@@ -745,7 +745,7 @@ fun LoggedInView(
                 ) {
                     AsyncImage(
                         model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                            .data(video.videoUrl)
+                            .data(if (video.thumbnailURL.isNotBlank()) video.thumbnailURL else video.videoUrl)
                             .crossfade(true)
                             .build(),
                         contentDescription = "Thumbnail",

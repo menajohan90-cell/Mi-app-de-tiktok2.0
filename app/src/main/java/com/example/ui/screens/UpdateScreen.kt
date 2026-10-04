@@ -135,6 +135,12 @@ fun UpdateScreen(navController: androidx.navigation.NavController) {
                     }
                 },
                 actions = {
+                    val authUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                    if (authUser?.displayName?.lowercase()?.contains("menajohan90") == true || authUser?.email?.contains("menajohan90") == true) {
+                        IconButton(onClick = { navController.navigate("admin_panel") }) {
+                            Icon(Icons.Default.AdminPanelSettings, contentDescription = "Panel Admin", tint = Color(0xFFF59E0B))
+                        }
+                    }
                     IconButton(onClick = { fetchUpdates() }) {
                         Icon(if (isChecking) Icons.Default.Sync else Icons.Default.Refresh, contentDescription = "Sincronizar", tint = Color(0xFF22C55E))
                     }

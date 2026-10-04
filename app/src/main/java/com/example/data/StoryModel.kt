@@ -5,6 +5,7 @@ data class StoryModel(
     val ownerId: String = "",
     val username: String = "",
     val mediaUrl: String = "",
+    val thumbnailUrl: String = "",
     val mediaType: String = "image", // "image" or "video"
     val createdAt: Long = 0L,
     val expiresAt: Long = 0L,

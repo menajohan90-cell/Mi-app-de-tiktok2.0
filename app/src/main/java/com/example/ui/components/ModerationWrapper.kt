@@ -34,8 +34,25 @@ fun ModerationWrapper(
         if (user != null) {
             val result = userRepository.getProfile(user.uid)
             result.onSuccess { profile ->
-                isSuspended = profile.suspended
+                val now = System.currentTimeMillis()
+                val isTemporarilySuspended = profile.suspendedUntil > 0 && profile.suspendedUntil > now
+                val isPermanentlySuspended = profile.suspended && (profile.suspendedUntil == 0L || profile.suspendedUntil > now)
+                
+                isSuspended = isTemporarilySuspended || isPermanentlySuspended
                 suspensionReason = profile.suspensionReason ?: ""
+                
+                if (isSuspended) {
+                    val remainingTime = if (profile.suspendedUntil > 0) {
+                        val diff = profile.suspendedUntil - now
+                        val days = diff / (24 * 60 * 60 * 1000)
+                        val hours = (diff / (60 * 60 * 1000)) % 24
+                        if (days > 0) "$days días" else "$hours horas"
+                    } else "Permanente"
+                    
+                    if (profile.suspendedUntil > 0) {
+                        suspensionReason += " (Expira en: $remainingTime)"
+                    }
+                }
                 
                 if (profile.moderationStatus == "nameViolation") {
                     hasNameViolation = true
@@ -77,7 +94,7 @@ fun ModerationWrapper(
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "Tu cuenta ha sido suspendida permanentemente por violar las normas de seguridad de la plataforma.",
+                "Tu cuenta ha sido restringida por violar las normas de seguridad de la plataforma.",
                 color = Color.LightGray,
                 fontSize = 16.sp,
                 textAlign = TextAlign.Center

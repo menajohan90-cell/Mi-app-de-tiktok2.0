@@ -537,7 +537,7 @@ fun ChatsScreen(navController: NavController? = null) {
                                     
                                     postRepository.publishStory(
                                         mediaFile = mediaFile,
-                                        mediaUrl = "",
+                                        thumbnailFile = mediaFile,
                                         visibility = storyPrivacy,
                                         mediaType = "image",
                                         soundName = ""

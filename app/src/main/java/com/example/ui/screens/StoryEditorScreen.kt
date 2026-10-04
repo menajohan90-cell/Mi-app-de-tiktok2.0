@@ -154,13 +154,24 @@ fun StoryEditorScreen(navController: NavController, mediaUri: Uri, mediaType: St
                         try {
                             val localPath = com.example.ui.screens.LocalVideoManager.copyVideoToLocal(context, mediaUri)
                             var mediaFile: java.io.File? = null
+                            var thumbnailFile: java.io.File? = null
+                            
                             if (localPath != null) {
                                 mediaFile = java.io.File(localPath)
+                                if (mediaType == "video") {
+                                    val thumbBitmap = com.example.utils.ThumbnailUtils.generateVideoThumbnail(context, Uri.fromFile(mediaFile))
+                                    if (thumbBitmap != null) {
+                                        thumbnailFile = com.example.utils.ThumbnailUtils.saveBitmapToCache(context, thumbBitmap, "story_thumb_${System.currentTimeMillis()}")
+                                    }
+                                } else {
+                                    // For images, we can just use the same file as thumbnail
+                                    thumbnailFile = mediaFile
+                                }
                             }
                             
                             val result = postRepository.publishStory(
                                 mediaFile = mediaFile,
-                                mediaUrl = "",
+                                thumbnailFile = thumbnailFile,
                                 visibility = selectedVisibility,
                                 mediaType = mediaType,
                                 soundName = selectedSound?.trackName ?: ""

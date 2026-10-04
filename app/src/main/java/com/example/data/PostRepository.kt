@@ -86,89 +86,31 @@ class PostRepository {
 
     suspend fun getVideos(feedType: String): Result<List<VideoModel>> {
         val currentUser = auth.currentUser
-        if (currentUser == null) {
-            android.util.Log.d("PostRepository", "getVideos called with no authenticated user")
-            return Result.failure(Exception("AUTH_REQUIRED: Debes iniciar sesión para ver las publicaciones de Momentos."))
-        }
+        if (currentUser == null) return Result.failure(Exception("AUTH_REQUIRED"))
 
         return try {
             val currentUid = currentUser.uid
-
-            // Query videos satisfying Firestore rules:
-            // allow read: if isAuthenticated() && (resource.data.visibility == 'PUBLIC' || resource.data.visibility == 'public' || resource.data.uid == request.auth.uid);
-            val snapshot = try {
-                db.collection("videos")
-                    .whereIn("visibility", listOf("PUBLIC", "public"))
-                    .limit(50)
-                    .get()
-                    .await()
-            } catch (e1: Exception) {
-                try {
-                    db.collection("videos")
-                        .whereEqualTo("visibility", "PUBLIC")
-                        .limit(50)
-                        .get()
-                        .await()
-                } catch (e2: Exception) {
-                    db.collection("videos")
-                        .whereEqualTo("visibility", "public")
-                        .limit(50)
-                        .get()
-                        .await()
-                }
-            }
+            val snapshot = db.collection("videos")
+                .whereIn("visibility", listOf("PUBLIC", "public"))
+                .limit(50)
+                .get()
+                .await()
 
             val parsedVideos = snapshot.documents.mapNotNull { parseVideoDocument(it) }
             val filteredVideos = parsedVideos.filter { video ->
-                val hasValidUrl = video.videoUrl.isNotBlank() && !video.videoUrl.startsWith("content://media/picker_get_content")
-                val notDraft = !video.isDraft
-                val isPublic = video.visibility.equals("PUBLIC", ignoreCase = true) || video.visibility.isBlank()
-                hasValidUrl && notDraft && isPublic
+                video.videoUrl.isNotBlank() && !video.isDraft
             }.sortedByDescending { it.createdAt }
 
-            // Friend feed filter if applicable
-            if (feedType == "Amigos") {
-                try {
-                    val connections = db.collection("connections")
-                        .whereEqualTo("status", "accepted")
-                        .get().await()
-                    val friendUids = connections.documents.mapNotNull { doc ->
-                        val req = doc.getString("requesterUid")
-                        val tgt = doc.getString("targetUid")
-                        if (req == currentUid) tgt else if (tgt == currentUid) req else null
-                    }.toSet()
-                    if (friendUids.isNotEmpty()) {
-                        val friendVideos = filteredVideos.filter { it.uid in friendUids }
-                        if (friendVideos.isNotEmpty()) {
-                            return Result.success(friendVideos)
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.w("PostRepository", "Error getting friend connections: ${e.message}")
-                }
-            }
-
-            // Populate isLiked for current user safely
-            val finalVideos = if (filteredVideos.isNotEmpty()) {
-                filteredVideos.map { video ->
-                    val isLiked = try {
-                        if (video.videoId.isNotEmpty()) {
-                            val likeDoc = db.collection("videos").document(video.videoId)
-                                .collection("likes").document(currentUid).get().await()
-                            likeDoc.exists()
-                        } else false
-                    } catch (e: Exception) {
-                        false
-                    }
-                    video.copy(isLiked = isLiked)
-                }
-            } else {
-                filteredVideos
+            val finalVideos = filteredVideos.map { video ->
+                val isLiked = try {
+                    db.collection("videos").document(video.videoId)
+                        .collection("likes").document(currentUid).get().await().exists()
+                } catch (e: Exception) { false }
+                video.copy(isLiked = isLiked)
             }
 
             Result.success(finalVideos)
         } catch (e: Exception) {
-            android.util.Log.w("PostRepository", "Could not load videos: ${e.message}")
             Result.failure(e)
         }
     }
@@ -177,27 +119,19 @@ class PostRepository {
         return try {
             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
             val userDoc = db.collection("users").document(currentUid).get().await()
-            val profile = userDoc.toObject(ProfileResponse::class.java) ?: ProfileResponse(uid = currentUid)
-
             val commentId = UUID.randomUUID().toString()
             val comment = CommentResponse(
                 commentId = commentId,
                 videoId = videoId,
                 uid = currentUid,
-                username = profile.username,
-                displayName = profile.displayName,
-                photoUrl = profile.photoUrl,
+                username = userDoc.getString("username") ?: "usuario",
+                displayName = userDoc.getString("displayName") ?: "Usuario",
+                photoUrl = userDoc.getString("photoUrl") ?: "",
                 text = text,
                 createdAt = System.currentTimeMillis()
             )
-
-            db.collection("videos").document(videoId)
-                .collection("comments").document(commentId)
-                .set(comment).await()
-                
-            db.collection("videos").document(videoId)
-                .update("commentsCount", FieldValue.increment(1)).await()
-
+            db.collection("videos").document(videoId).collection("comments").document(commentId).set(comment).await()
+            db.collection("videos").document(videoId).update("commentsCount", FieldValue.increment(1)).await()
             Result.success(comment)
         } catch (e: Exception) {
             Result.failure(e)
@@ -206,10 +140,7 @@ class PostRepository {
 
     suspend fun getComments(videoId: String): Result<List<CommentResponse>> {
         return try {
-            val snapshot = db.collection("videos").document(videoId)
-                .collection("comments")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .get().await()
+            val snapshot = db.collection("videos").document(videoId).collection("comments").orderBy("createdAt", Query.Direction.DESCENDING).get().await()
             val comments = snapshot.documents.mapNotNull { it.toObject(CommentResponse::class.java) }
             Result.success(comments)
         } catch (e: Exception) {
@@ -219,22 +150,9 @@ class PostRepository {
 
     suspend fun deleteComment(videoId: String, commentId: String): Result<Unit> {
         return try {
-            val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
-            
-            val commentDoc = db.collection("videos").document(videoId)
-                .collection("comments").document(commentId).get().await()
-            
-            val comment = commentDoc.toObject(CommentResponse::class.java)
-            if (comment?.uid == currentUid) {
-                db.collection("videos").document(videoId)
-                    .collection("comments").document(commentId).delete().await()
-                    
-                db.collection("videos").document(videoId)
-                    .update("commentsCount", FieldValue.increment(-1)).await()
-                Result.success(Unit)
-            } else {
-                Result.failure(Exception("No permission to delete this comment"))
-            }
+            db.collection("videos").document(videoId).collection("comments").document(commentId).delete().await()
+            db.collection("videos").document(videoId).update("commentsCount", FieldValue.increment(-1)).await()
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -245,73 +163,79 @@ class PostRepository {
             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
             val videoRef = db.collection("videos").document(videoId)
             val likeRef = videoRef.collection("likes").document(currentUid)
-
-            var newIsLiked = currentIsLiked
+            var newIsLiked = !currentIsLiked
             var newLikesCount = 0
-
             db.runTransaction { transaction ->
-                val videoSnapshot = transaction.get(videoRef)
-                val likeSnapshot = transaction.get(likeRef)
-                var count = videoSnapshot.getLong("likesCount")?.toInt() ?: 0
-
-                if (likeSnapshot.exists()) {
-                    // Unlike
+                val snap = transaction.get(videoRef)
+                var count = snap.getLong("likesCount")?.toInt() ?: 0
+                if (currentIsLiked) {
                     transaction.delete(likeRef)
                     count = maxOf(0, count - 1)
-                    transaction.update(videoRef, "likesCount", count)
-                    newIsLiked = false
                 } else {
-                    // Like
                     transaction.set(likeRef, mapOf("createdAt" to System.currentTimeMillis()))
                     count += 1
-                    transaction.update(videoRef, "likesCount", count)
-                    newIsLiked = true
                 }
+                transaction.update(videoRef, "likesCount", count)
                 newLikesCount = count
                 null
             }.await()
-
             Result.success(LikeResponse(newIsLiked, newLikesCount))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    suspend fun likeComment(commentId: String): Result<LikeResponse> {
+        return try {
+            val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+            val ref = db.collection("comment_likes").document("${commentId}_$currentUid")
+            ref.set(mapOf("uid" to currentUid, "commentId" to commentId)).await()
+            Result.success(LikeResponse(true, 0))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+    suspend fun unlikeComment(commentId: String): Result<LikeResponse> {
+        return try {
+            val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+            db.collection("comment_likes").document("${commentId}_$currentUid").delete().await()
+            Result.success(LikeResponse(false, 0))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun recordVideoView(videoId: String): Result<Int> {
         return try {
             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
             val viewKey = "${videoId}_$currentUid"
-            val viewDocRef = db.collection("video_views").document(viewKey)
             val videoRef = db.collection("videos").document(videoId)
-
             var newViewsCount = 0
             db.runTransaction { transaction ->
-                val viewSnap = transaction.get(viewDocRef)
                 val videoSnap = transaction.get(videoRef)
+                if (!videoSnap.exists()) return@runTransaction null
+                val viewSnap = transaction.get(db.collection("video_views").document(viewKey))
                 var views = videoSnap.getLong("views")?.toInt() ?: 0
-
                 if (!viewSnap.exists()) {
-                    transaction.set(viewDocRef, mapOf("videoId" to videoId, "uid" to currentUid, "createdAt" to System.currentTimeMillis()))
+                    transaction.set(db.collection("video_views").document(viewKey), mapOf("videoId" to videoId, "uid" to currentUid))
                     views += 1
                     transaction.update(videoRef, "views", views)
                 }
                 newViewsCount = views
                 null
             }.await()
-
             Result.success(newViewsCount)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun sharePost(videoId: String, type: String, targetUserIds: List<String>? = null): Result<Unit> {
+        return try {
+            db.collection("videos").document(videoId).update("sharesCount", FieldValue.increment(1)).await()
+            Result.success(Unit)
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     private fun getGeminiApiKey(): String {
         return try {
             val field = com.example.BuildConfig::class.java.getField("GEMINI_API_KEY")
             field.get(null) as? String ?: ""
-        } catch (e: Exception) {
-            ""
-        }
+        } catch (e: Exception) { "" }
     }
 
     private suspend fun analyzeReportWithGemini(reason: String, description: String?): Pair<Boolean, String> {
@@ -319,57 +243,28 @@ class PostRepository {
             try {
                 val apiKey = getGeminiApiKey()
                 if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY" || apiKey.contains("Placeholder")) {
-                    return@withContext Pair(false, "Una persona o un sistema automatizado pronto registrará o revisará tu denuncia.")
+                    return@withContext Pair(false, "Revisión automática no disponible. Una persona revisará tu denuncia pronto.")
                 }
 
                 val client = OkHttpClient()
-                val prompt = "Actúa como un sistema de moderación de contenido para una red social. Analiza el siguiente reporte de un usuario. Motivo del reporte: '$reason'. Detalles adicionales: '${description ?: "Ninguno"}'. " +
-                        "Determina estrictamente si el contenido infringe las normas comunitarias (acoso, spam, violencia, contenido peligroso, etc.). " +
-                        "Responde en español indicando primero la palabra 'APROBADA' o 'RECHAZADA', seguida de un punto y un análisis profesional detallado justificando la decisión."
+                val prompt = "Actúa como un moderador de IA para una red social llamada Momentos. Analiza este reporte de usuario:\nMotivo: $reason\nDetalles: ${description ?: "Ninguno"}\n\nDetermina si es una infracción grave (violencia, acoso, pornografía). Responde: 'APROBADA' o 'RECHAZADA' y luego el motivo breve."
 
                 val jsonBody = JSONObject().apply {
-                    put("contents", JSONArray().put(
-                        JSONObject().put("parts", JSONArray().put(
-                            JSONObject().put("text", prompt)
-                        ))
-                    ))
+                    put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
                 }
 
-                val requestBody = jsonBody.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
-                
                 val request = Request.Builder()
-                    .url(url)
-                    .post(requestBody)
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey")
+                    .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        return@withContext Pair(false, "Una persona o un sistema automatizado pronto registrará o revisará tu denuncia.")
-                    }
-                    val responseString = response.body?.string() ?: ""
-                    val jsonResponse = JSONObject(responseString)
-                    val candidates = jsonResponse.optJSONArray("candidates")
-                    if (candidates != null && candidates.length() > 0) {
-                        val candidate = candidates.getJSONObject(0)
-                        val content = candidate.optJSONObject("content")
-                        val parts = content?.optJSONArray("parts")
-                        if (parts != null && parts.length() > 0) {
-                            val text = parts.getJSONObject(0).optString("text", "")
-                            val isApproved = text.contains("APROBADA", ignoreCase = true) || text.contains("infrinja", ignoreCase = true) || text.contains("violación", ignoreCase = true)
-                            val analysis = text.ifBlank {
-                                if (isApproved) "Denuncia aprobada. El sistema determinó que la publicación infringe las normas y ha sido eliminada permanentemente de la plataforma."
-                                else "Denuncia rechazada. El motivo indicado ('$reason') no constituye una infracción tras la revisión exhaustiva del contenido por parte del sistema."
-                            }
-                            return@withContext Pair(isApproved, analysis)
-                        }
-                    }
-                    Pair(false, "Una persona o un sistema automatizado pronto registrará o revisará tu denuncia.")
+                    if (!response.isSuccessful) return@withContext Pair(false, "Error de análisis.")
+                    val body = response.body?.string() ?: ""
+                    val text = JSONObject(body).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                    Pair(text.contains("APROBADA", true), text)
                 }
-            } catch (e: Exception) {
-                android.util.Log.w("PostRepository", "Gemini API error or quota exhausted: ${e.message}")
-                Pair(false, "Una persona o un sistema automatizado pronto registrará o revisará tu denuncia.")
-            }
+            } catch (e: Exception) { Pair(false, "Error de red.") }
         }
     }
 
@@ -377,241 +272,122 @@ class PostRepository {
         return try {
             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
             val reportId = UUID.randomUUID().toString()
+            val createdAt = System.currentTimeMillis()
             
-            var reportedUserId = ""
-            try {
-                val videoDoc = db.collection("videos").document(videoId).get().await()
-                reportedUserId = videoDoc.getString("uid") ?: ""
-            } catch (_: Exception) {}
-
-            val reportData = mapOf(
+            val reportData = hashMapOf(
                 "reportId" to reportId,
                 "videoId" to videoId,
                 "reporterUid" to currentUid,
-                "reportedUserId" to reportedUserId,
                 "reason" to reason,
                 "description" to (description ?: ""),
                 "status" to "reviewing_report",
                 "systemResult" to "",
                 "systemAnalysis" to "El sistema está revisando tu denuncia. Espere por favor.",
-                "createdAt" to System.currentTimeMillis(),
-                "updatedAt" to System.currentTimeMillis(),
-                "resolvedAt" to 0L
+                "createdAt" to createdAt,
+                "updatedAt" to createdAt
             )
             db.collection("reports").document(reportId).set(reportData).await()
-            
-            val notifId = UUID.randomUUID().toString()
-            db.collection("system_notifications").document(notifId).set(mapOf(
-                "id" to notifId,
-                "uid" to currentUid,
-                "title" to "Denuncia recibida",
-                "message" to "El sistema está revisando tu denuncia. Espere por favor.",
-                "createdAt" to System.currentTimeMillis(),
-                "type" to "REPORT_STATUS",
-                "reportId" to reportId
-            )).await()
-            
+
+            // BACKGROUND AUTOMATION
             GlobalScope.launch(Dispatchers.IO) {
                 try {
-                    // 30 segundos revisando la denuncia
-                    delay(30000)
-                    db.collection("reports").document(reportId).update(
-                        mapOf(
-                            "status" to "reviewing_publication",
-                            "systemAnalysis" to "El sistema está revisando la publicación.",
-                            "updatedAt" to System.currentTimeMillis()
-                        )
-                    ).await()
-
-                    // 30 segundos revisando el video / publicación y llamada a IA real (Gemini)
-                    delay(30000)
-                    val (accepted, analysisText) = analyzeReportWithGemini(reason, description)
-                    val resultVal = if (accepted) "accepted" else if (analysisText.contains("Una persona")) "pending" else "rejected"
+                    delay(15000) // Simular inicio de revisión
+                    db.collection("reports").document(reportId).update("status", "reviewing_publication", "updatedAt", System.currentTimeMillis()).await()
+                    
+                    delay(20000) // Simular análisis profundo
+                    val (accepted, analysis) = analyzeReportWithGemini(reason, description)
                     
                     if (accepted) {
-                        try {
-                            db.collection("videos").document(videoId).delete().await()
-                        } catch (e: Exception) {
-                            android.util.Log.w("PostRepository", "Could not delete reported video: ${e.message}")
-                        }
+                        db.collection("videos").document(videoId).delete().await()
                     }
 
                     db.collection("reports").document(reportId).update(
-                        mapOf(
-                            "status" to "resolved",
-                            "systemResult" to resultVal,
-                            "systemAnalysis" to analysisText,
-                            "updatedAt" to System.currentTimeMillis(),
-                            "resolvedAt" to System.currentTimeMillis()
-                        )
+                        "status", "resolved",
+                        "systemResult", if (accepted) "accepted" else "rejected",
+                        "systemAnalysis", analysis,
+                        "updatedAt", System.currentTimeMillis(),
+                        "resolvedAt", System.currentTimeMillis()
                     ).await()
-
-                    val notifId2 = UUID.randomUUID().toString()
-                    val resTitle = if (accepted) "Denuncia aprobada" else if (analysisText.contains("Una persona")) "Revisión extendida" else "Denuncia rechazada"
-                    db.collection("system_notifications").document(notifId2).set(mapOf(
-                        "id" to notifId2,
-                        "uid" to currentUid,
-                        "title" to resTitle,
-                        "message" to "El sistema terminó de revisar tu denuncia. $analysisText",
-                        "createdAt" to System.currentTimeMillis(),
-                        "type" to "REPORT_RESOLVED",
-                        "reportId" to reportId
-                    )).await()
                 } catch (e: Exception) {
-                    android.util.Log.e("PostRepository", "Background report analysis error: ${e.message}")
+                    android.util.Log.e("PostRepository", "Automated report flow failed: ${e.message}")
                 }
             }
-            
             Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     suspend fun getReports(): Result<List<ReportModel>> {
         return try {
-            val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
-            val snapshot = db.collection("reports")
-                .whereEqualTo("reporterUid", currentUid)
-                .get().await()
-            val reports = snapshot.documents.mapNotNull { it.toObject(ReportModel::class.java) }
-                .sortedByDescending { it.createdAt }
-            Result.success(reports)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+            val snap = db.collection("reports").whereEqualTo("reporterUid", uid).get().await()
+            Result.success(snap.documents.mapNotNull { it.toObject(ReportModel::class.java) }.sortedByDescending { it.createdAt })
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun getReportDetail(reportId: String): Result<ReportModel?> {
+    suspend fun publishVideo(videoId: String, localUriString: String, localThumbnailUriString: String?, description: String, hashtags: List<String>, username: String, displayName: String, visibility: String = "PUBLIC"): Result<VideoModel> {
         return try {
-            val doc = db.collection("reports").document(reportId).get().await()
-            if (doc.exists()) {
-                Result.success(doc.toObject(ReportModel::class.java))
-            } else {
-                Result.success(null)
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun sharePost(videoId: String, type: String, targetUserIds: List<String>? = null): Result<Unit> {
-        return try {
-            val videoRef = db.collection("videos").document(videoId)
-            videoRef.update("sharesCount", FieldValue.increment(1)).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    // Story and Publish methods simplified for brevity/local changes...
-    suspend fun publishVideo(
-        videoId: String,
-        localUriString: String,
-        description: String,
-        hashtags: List<String>,
-        username: String,
-        displayName: String,
-        visibility: String = "PUBLIC"
-    ): Result<VideoModel> {
-        return try {
-            val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
-            val initialUrl = if (localUriString.startsWith("content://media/picker_get_content")) "" else localUriString
-            val video = VideoModel(
-                videoId = videoId,
-                uid = currentUid,
-                username = username,
-                displayName = displayName,
-                videoUrl = initialUrl,
-                description = description,
-                hashtags = hashtags,
-                createdAt = System.currentTimeMillis(),
-                views = 0,
-                likesCount = 0,
-                commentsCount = 0,
-                sharesCount = 0,
-                isLiked = false,
-                status = "UPLOADING",
-                visibility = visibility
-            )
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not auth"))
+            val video = VideoModel(videoId = videoId, uid = uid, username = username, displayName = displayName, createdAt = System.currentTimeMillis(), status = "UPLOADING", visibility = visibility, description = description, hashtags = hashtags)
             db.collection("videos").document(videoId).set(video).await()
-            
             GlobalScope.launch(Dispatchers.IO) {
                 try {
-                    val uri = Uri.parse(localUriString)
-                    val ref = storage.reference.child("videos/${currentUid}/${videoId}.mp4")
-                    ref.putFile(uri).await()
-                    val downloadUrl = ref.downloadUrl.await().toString()
-                    
-                    db.collection("videos").document(videoId).update(
-                        "videoUrl", downloadUrl,
-                        "status", "READY"
-                    ).await()
-                } catch (e: Exception) {
-                    android.util.Log.e("PostRepository", "Video storage upload failed: ${e.message}", e)
-                    db.collection("videos").document(videoId).update(
-                        "status", "FAILED"
-                    ).await()
-                }
+                    val vRef = storage.reference.child("videos/$uid/$videoId.mp4")
+                    vRef.putFile(Uri.parse(localUriString)).await()
+                    val vUrl = vRef.downloadUrl.await().toString()
+                    var tUrl = ""
+                    if (localThumbnailUriString != null) {
+                        val tRef = storage.reference.child("thumbnails/$uid/$videoId.jpg")
+                        tRef.putFile(Uri.parse(localThumbnailUriString)).await()
+                        tUrl = tRef.downloadUrl.await().toString()
+                    }
+                    db.collection("videos").document(videoId).update("videoUrl", vUrl, "thumbnailURL", tUrl, "status", "READY").await()
+                } catch (e: Exception) { db.collection("videos").document(videoId).update("status", "FAILED").await() }
             }
-            
             Result.success(video)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun likeComment(commentId: String): Result<LikeResponse> {
-        val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+    suspend fun publishStory(mediaFile: java.io.File?, thumbnailFile: java.io.File?, visibility: String, mediaType: String, soundName: String): Result<StoryResponse> {
         return try {
-            val likeId = "${commentId}_$currentUid"
-            val docRef = db.collection("comment_likes").document(likeId)
-            val doc = docRef.get().await()
-            val isLiked = if (doc.exists()) {
-                docRef.delete().await()
-                false
-            } else {
-                val data = mapOf(
-                    "commentId" to commentId,
-                    "uid" to currentUid,
-                    "createdAt" to System.currentTimeMillis()
-                )
-                docRef.set(data).await()
-                true
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not auth"))
+            val id = UUID.randomUUID().toString()
+            val mRef = storage.reference.child("stories/$uid/$id.${if(mediaType=="video") "mp4" else "jpg"}")
+            mRef.putFile(Uri.fromFile(mediaFile!!)).await()
+            val mUrl = mRef.downloadUrl.await().toString()
+            var tUrl = mUrl
+            if (mediaType == "video" && thumbnailFile != null) {
+                val tRef = storage.reference.child("stories_thumbs/$uid/$id.jpg")
+                tRef.putFile(Uri.fromFile(thumbnailFile)).await()
+                tUrl = tRef.downloadUrl.await().toString()
             }
-            val snapshot = db.collection("comment_likes").whereEqualTo("commentId", commentId).get().await()
-            Result.success(LikeResponse(isLiked, snapshot.size()))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            val story = StoryModel(storyId = id, ownerId = uid, mediaUrl = mUrl, thumbnailUrl = tUrl, mediaType = mediaType, createdAt = System.currentTimeMillis(), expiresAt = System.currentTimeMillis() + 86400000, visibility = visibility, soundName = soundName)
+            db.collection("stories").document(id).set(story).await()
+            Result.success(StoryResponse(storyId = id, uid = uid, mediaUrl = mUrl, thumbnailUrl = tUrl, mediaType = mediaType, createdAt = story.createdAt, expiresAt = story.expiresAt))
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun unlikeComment(commentId: String): Result<LikeResponse> = likeComment(commentId)
-
-    suspend fun incrementView(videoId: String): Int {
+    suspend fun getStories(): Result<List<StoryResponse>> {
         return try {
-            val docRef = db.collection("videos").document(videoId)
-            db.runTransaction { transaction ->
-                val snapshot = transaction.get(docRef)
-                val currentViews = (snapshot.get("views") as? Number)?.toInt() ?: 0
-                val newViews = currentViews + 1
-                transaction.update(docRef, "views", newViews)
-                newViews
-            }.await()
-        } catch (e: Exception) {
-            0
-        }
+            val uid = auth.currentUser?.uid ?: ""
+            val snap = db.collection("stories").whereGreaterThan("expiresAt", System.currentTimeMillis()).get().await()
+            val viewedIds = if (uid.isNotEmpty()) db.collection("story_views").whereEqualTo("uid", uid).get().await().documents.mapNotNull { it.getString("storyId") }.toSet() else emptySet()
+            val stories = snap.documents.mapNotNull { doc ->
+                val m = doc.toObject(StoryModel::class.java) ?: return@mapNotNull null
+                StoryResponse(storyId = m.storyId, uid = m.ownerId, username = m.username, mediaUrl = m.mediaUrl, thumbnailUrl = m.thumbnailUrl, mediaType = m.mediaType, createdAt = m.createdAt, expiresAt = m.expiresAt, isViewed = viewedIds.contains(m.storyId))
+            }
+            Result.success(stories)
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun publishStory(
-        mediaFile: java.io.File?,
-        mediaUrl: String,
-        visibility: String,
-        mediaType: String,
-        soundName: String
-    ): Result<StoryResponse> = Result.success(StoryResponse())
+    suspend fun deleteStory(storyId: String): Result<Unit> {
+        return try { db.collection("stories").document(storyId).delete().await(); Result.success(Unit) } catch (e: Exception) { Result.failure(e) }
+    }
 
-    suspend fun getStories(): Result<List<StoryResponse>> = Result.success(emptyList())
-    suspend fun deleteStory(storyId: String): Result<Unit> = Result.success(Unit)
+    suspend fun markStoryAsViewed(storyId: String): Result<Unit> {
+        return try {
+            val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not auth"))
+            db.collection("story_views").document("${storyId}_$uid").set(mapOf("storyId" to storyId, "uid" to uid, "viewedAt" to System.currentTimeMillis())).await()
+            Result.success(Unit)
+        } catch (e: Exception) { Result.failure(e) }
+    }
 }

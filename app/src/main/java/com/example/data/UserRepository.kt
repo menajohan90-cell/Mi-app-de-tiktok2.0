@@ -276,4 +276,19 @@ class UserRepository {
             Result.failure(e)
         }
     }
+
+    suspend fun suspendUser(targetUid: String, durationMs: Long, reason: String): Result<Unit> {
+        return try {
+            val suspendedUntil = if (durationMs > 0) System.currentTimeMillis() + durationMs else 0L
+            val data = mapOf(
+                "suspended" to (durationMs > 0),
+                "suspendedUntil" to suspendedUntil,
+                "suspensionReason" to reason
+            )
+            db.collection("users").document(targetUid).set(data, com.google.firebase.firestore.SetOptions.merge()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

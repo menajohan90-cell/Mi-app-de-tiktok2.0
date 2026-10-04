@@ -320,6 +320,9 @@ fun MainNavigationScreen() {
                 composable("admin_badges") {
                     AdminBadgePanelScreen(navController = navController)
                 }
+                composable("admin_panel") {
+                    AdminPanelScreen(navController = navController)
+                }
                 composable("update_screen") {
                     UpdateScreen(navController = navController)
                 }

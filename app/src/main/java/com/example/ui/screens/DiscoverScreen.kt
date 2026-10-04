@@ -232,7 +232,7 @@ fun DiscoverScreen(navController: androidx.navigation.NavController) {
                                 ) {
                                     AsyncImage(
                                         model = ImageRequest.Builder(context)
-                                            .data(video.videoUrl)
+                                            .data(if (video.thumbnailURL.isNotBlank()) video.thumbnailURL else video.videoUrl)
                                             .crossfade(true)
                                             .build(),
                                         contentDescription = "Miniatura",

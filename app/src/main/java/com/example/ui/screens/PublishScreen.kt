@@ -42,6 +42,7 @@ import com.example.data.VideoModel
 import com.example.data.PostRepository
 import com.example.data.UserRepository
 import com.example.data.ProfileResponse
+import com.example.utils.ThumbnailUtils
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -317,17 +318,23 @@ fun PublishScreen(navController: NavController) {
                                     .map { if (it.startsWith("#")) it else "#$it" }
                                 
                                 val localFileUriString = Uri.fromFile(java.io.File(localVideoPath)).toString()
+                                
+                                // Generate Thumbnail
+                                val thumbBitmap = ThumbnailUtils.generateVideoThumbnail(context, Uri.parse(localFileUriString))
+                                val thumbFile = if (thumbBitmap != null) ThumbnailUtils.saveBitmapToCache(context, thumbBitmap, "thumb_$videoId") else null
+                                val thumbUriString = if (thumbFile != null) Uri.fromFile(thumbFile).toString() else null
 
                                 scope.launch {
                                     try {
                                         val result = postRepository.publishVideo(
                                             videoId = videoId,
                                             localUriString = localFileUriString,
+                                            localThumbnailUriString = thumbUriString,
                                             description = description,
                                             hashtags = hashtagsList,
                                             username = currentUserProfile?.username ?: user?.displayName?.lowercase()?.replace(" " , "") ?: "invitado",
                                             displayName = currentUserProfile?.displayName ?: user?.displayName ?: "Invitado",
-                                            visibility = "PUBLIC" // TODO: Add visibility state
+                                            visibility = "PUBLIC" 
                                         )
                                         
                                         // Show private security review animation

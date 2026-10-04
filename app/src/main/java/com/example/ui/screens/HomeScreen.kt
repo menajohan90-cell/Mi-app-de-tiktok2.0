@@ -103,6 +103,13 @@ fun StoryBar(navController: androidx.navigation.NavController) {
         }
         
         items(stories) { story ->
+            val isCustom = story.soundName == "Personalizado" 
+            val ringColor = when {
+                story.isViewed -> Color.Gray.copy(alpha = 0.5f) // Viewed
+                isCustom -> Color(0xFFF59E0B) // Custom ring (yellow/gold)
+                else -> Color(0xFF3B82F6) // Standard ring (blue)
+            }
+            
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.clickable { navController.navigate("story_view/${story.storyId}") }
@@ -111,11 +118,11 @@ fun StoryBar(navController: androidx.navigation.NavController) {
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
-                        .border(2.dp, Color(0xFFEF4444), CircleShape)
+                        .border(2.dp, ringColor, CircleShape)
                         .padding(3.dp)
                 ) {
                     AsyncImage(
-                        model = story.mediaUrl,
+                        model = if (story.thumbnailUrl.isNotBlank()) story.thumbnailUrl else story.mediaUrl,
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize().clip(CircleShape),
                         contentScale = ContentScale.Crop

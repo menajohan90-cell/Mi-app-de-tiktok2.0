@@ -53,6 +53,7 @@ import com.example.data.VideoModel
 import com.example.data.CommentResponse
 import com.example.utils.AppIcons
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -417,14 +418,18 @@ fun VideoPlayerItem(videoModel: VideoModel, isPlaying: Boolean, navController: a
     LaunchedEffect(isPlaying, isMediaAccessible) {
         if (isPlaying && isMediaAccessible) {
             exoPlayer.play()
+            // Record view after 2 seconds of playback
             scope.launch {
-                try {
-                    val result = postRepository.recordVideoView(safeVideoId)
-                    result.onSuccess { newViews ->
-                        onVideoUpdated(videoModel.copy(views = newViews))
+                delay(2000)
+                if (exoPlayer.isPlaying) {
+                    try {
+                        val result = postRepository.recordVideoView(safeVideoId)
+                        result.onSuccess { newViews ->
+                            onVideoUpdated(videoModel.copy(views = newViews))
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("FeedScreen", "Error recording view: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    android.util.Log.w("FeedScreen", "Error recording view: ${e.message}")
                 }
             }
         } else {
@@ -454,51 +459,77 @@ fun VideoPlayerItem(videoModel: VideoModel, isPlaying: Boolean, navController: a
         action()
     }
 
+    var isPlayerReady by remember { mutableStateOf(false) }
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) isPlayerReady = true
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose { exoPlayer.removeListener(listener) }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         if (isMediaAccessible) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        player = exoPlayer
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                    }
-                },
-                update = { it.player = exoPlayer },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = {
-                                runSecureAction {
-                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                    scope.launch {
-                                        try {
-                                            scaleA.animateTo(1.2f, tween(100))
-                                            scaleA.animateTo(1f, tween(100))
-                                            
-                                            val result = postRepository.toggleLikeVideo(safeVideoId, isLiked)
-                                            result.onSuccess { 
-                                                isLiked = it.isLiked
-                                                likesCount = it.likesCount
-                                                onVideoUpdated(videoModel.copy(isLiked = it.isLiked, likesCount = it.likesCount))
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            player = exoPlayer
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            layoutParams = FrameLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                        }
+                    },
+                    update = { it.player = exoPlayer },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    runSecureAction {
+                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                        scope.launch {
+                                            try {
+                                                scaleA.animateTo(1.2f, tween(100))
+                                                scaleA.animateTo(1f, tween(100))
+                                                
+                                                val result = postRepository.toggleLikeVideo(safeVideoId, isLiked)
+                                                result.onSuccess { 
+                                                    isLiked = it.isLiked
+                                                    likesCount = it.likesCount
+                                                    onVideoUpdated(videoModel.copy(isLiked = it.isLiked, likesCount = it.likesCount))
+                                                }
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("FeedScreen", "Error toggling like", e)
                                             }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("FeedScreen", "Error toggling like", e)
                                         }
                                     }
+                                },
+                                onTap = {
+                                    if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
                                 }
-                            },
-                            onTap = {
-                                if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
-                            }
-                        )
-                    }
-            )
+                            )
+                        }
+                )
+
+                // Thumbnail Overlay (Source of Truth)
+                if (!isPlayerReady || !exoPlayer.isPlaying) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(if (videoModel.thumbnailURL.isNotBlank()) videoModel.thumbnailURL else videoModel.videoUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
         } else {
             Box(
                 modifier = Modifier

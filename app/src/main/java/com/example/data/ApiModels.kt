@@ -40,7 +40,8 @@ data class ProfileResponse(
     val isVerified: Boolean = false,
     val isSinger: Boolean = false,
     val isCrown: Boolean = false,
-    val isCreator: Boolean = false
+    val isCreator: Boolean = false,
+    val suspendedUntil: Long = 0L
 )
 
 data class UserBrief(
@@ -76,9 +77,11 @@ data class StoryResponse(
     val username: String = "",
     val photoUrl: String = "",
     val mediaUrl: String = "",
+    val thumbnailUrl: String = "",
     val mediaType: String = "",
     val createdAt: Long = 0L,
-    val expiresAt: Long = 0L, val soundName: String = ""
+    val expiresAt: Long = 0L, val soundName: String = "",
+    val isViewed: Boolean = false
 )
 
 data class LikeResponse(
