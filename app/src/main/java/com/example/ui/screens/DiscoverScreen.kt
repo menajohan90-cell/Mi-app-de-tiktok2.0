@@ -232,8 +232,10 @@ fun DiscoverScreen(navController: androidx.navigation.NavController) {
                                 ) {
                                     AsyncImage(
                                         model = ImageRequest.Builder(context)
-                                            .data(if (video.thumbnailURL.isNotBlank()) video.thumbnailURL else video.videoUrl)
+                                            .data(video.thumbnailUrl.ifBlank { video.videoUrl })
                                             .crossfade(true)
+                                            .placeholder(android.R.drawable.progress_horizontal)
+                                            .error(android.R.drawable.ic_menu_gallery)
                                             .build(),
                                         contentDescription = "Miniatura",
                                         contentScale = ContentScale.Crop,
@@ -365,8 +367,10 @@ fun DiscoverScreen(navController: androidx.navigation.NavController) {
                                     ) {
                                         AsyncImage(
                                             model = ImageRequest.Builder(context)
-                                                .data(video.videoUrl)
+                                                .data(video.thumbnailUrl.ifBlank { video.videoUrl })
                                                 .crossfade(true)
+                                                .placeholder(android.R.drawable.progress_horizontal)
+                                                .error(android.R.drawable.ic_menu_gallery)
                                                 .build(),
                                             contentDescription = "Miniatura",
                                             contentScale = ContentScale.Crop,

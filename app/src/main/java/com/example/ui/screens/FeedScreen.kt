@@ -349,6 +349,10 @@ fun VideoPlayerItem(videoModel: VideoModel, isPlaying: Boolean, navController: a
     var showShare by remember { mutableStateOf(false) }
     var showReport by remember { mutableStateOf(false) }
 
+    // Secret Delete
+    var showSecretDeleteDialog by remember { mutableStateOf(false) }
+    var secretCodeInput by remember { mutableStateOf("") }
+
     // Like Animation
     val scaleA = remember { Animatable(1f) }
 
@@ -510,6 +514,10 @@ fun VideoPlayerItem(videoModel: VideoModel, isPlaying: Boolean, navController: a
                                         }
                                     }
                                 },
+                                onLongPress = {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    showSecretDeleteDialog = true
+                                },
                                 onTap = {
                                     if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
                                 }
@@ -521,8 +529,9 @@ fun VideoPlayerItem(videoModel: VideoModel, isPlaying: Boolean, navController: a
                 if (!isPlayerReady || !exoPlayer.isPlaying) {
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(if (videoModel.thumbnailURL.isNotBlank()) videoModel.thumbnailURL else videoModel.videoUrl)
+                            .data(videoModel.thumbnailUrl.ifBlank { videoModel.videoUrl })
                             .crossfade(true)
+                            .placeholder(android.R.drawable.progress_horizontal)
                             .build(),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
@@ -713,6 +722,67 @@ fun VideoPlayerItem(videoModel: VideoModel, isPlaying: Boolean, navController: a
             ReportSection(videoModel, currentUid, postRepository, onDismiss = { showReport = false })
         }
     }
+
+    if (showSecretDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showSecretDeleteDialog = false 
+                secretCodeInput = ""
+            },
+            containerColor = Color(0xFF1E1E1E),
+            title = { Text("Mantenimiento", color = Color.White) },
+            text = {
+                Column {
+                    Text("Ingresa código para gestionar publicación:", color = Color.Gray, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = secretCodeInput,
+                        onValueChange = { secretCodeInput = it },
+                        placeholder = { Text("Código") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFEF4444)
+                        ),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (secretCodeInput == "1974") {
+                            scope.launch {
+                                val res = postRepository.deleteVideo(videoModel.videoId)
+                                if (res.isSuccess) {
+                                    Toast.makeText(context, "Publicación eliminada", Toast.LENGTH_SHORT).show()
+                                    showSecretDeleteDialog = false
+                                    // Normally we should update the list, but popBackStack is a safe fallback for detail views
+                                    // or just force a reload via state if in main feed.
+                                } else {
+                                    Toast.makeText(context, "Error al eliminar", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } else {
+                            Toast.makeText(context, "Código incorrecto", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444))
+                ) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSecretDeleteDialog = false }) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            }
+        )
+    }
 }
 }
 
@@ -876,7 +946,7 @@ fun CommentItem(
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable {
                 scope.launch {
-                    val result = if (isLiked) repository.unlikeComment(comment.commentId) else repository.likeComment(comment.commentId)
+                    val result = if (isLiked) repository.unlikeComment(comment.videoId, comment.commentId) else repository.likeComment(comment.videoId, comment.commentId)
                     if (result.isSuccess) {
                         isLiked = result.getOrNull()!!.isLiked
                         likesCount = result.getOrNull()!!.likesCount

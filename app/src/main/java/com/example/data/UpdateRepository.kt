@@ -98,23 +98,54 @@ class UpdateRepository {
             try {
                 // repoPath ej: "usuario/mi-repositorio"
                 val url = "https://api.github.com/repos/$repoPath/releases/latest"
-                val client = OkHttpClient()
-                val request = Request.Builder().url(url).build()
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .build()
+                
                 val response = client.newCall(request).execute()
                 
                 if (response.isSuccessful) {
                     val body = response.body?.string() ?: ""
-                    // Búsqueda simple del primer browser_download_url que termine en .apk
-                    val regex = Regex("\"browser_download_url\":\\s*\"(.*?\\.apk)\"")
-                    val match = regex.find(body)
-                    val apkUrl = match?.groupValues?.get(1)
+                    val json = org.json.JSONObject(body)
+                    val assets = json.optJSONArray("assets")
+                    
+                    var apkUrl: String? = null
+                    if (assets != null) {
+                        for (i in 0 until assets.length()) {
+                            val asset = assets.getJSONObject(i)
+                            val name = asset.optString("name", "")
+                            if (name.endsWith(".apk", ignoreCase = true)) {
+                                apkUrl = asset.optString("browser_download_url")
+                                break
+                            }
+                        }
+                    }
+                    
                     if (apkUrl != null) {
                         Result.success(apkUrl)
                     } else {
-                        Result.failure(Exception("No se encontró archivo APK en el Release de GitHub"))
+                        // Fallback to regex if assets array is missing but url exists in body
+                        val regex = Regex("\"browser_download_url\":\\s*\"(.*?\\.apk)\"")
+                        val match = regex.find(body)
+                        val fallbackUrl = match?.groupValues?.get(1)
+                        if (fallbackUrl != null) {
+                            Result.success(fallbackUrl)
+                        } else {
+                            Result.failure(Exception("No se encontró archivo APK en la última versión de GitHub ($repoPath)"))
+                        }
                     }
                 } else {
-                    Result.failure(Exception("Error al consultar GitHub: ${response.code}"))
+                    val errorMsg = when (response.code) {
+                        404 -> "Repositorio no encontrado o sin versiones públicas."
+                        403 -> "Límite de API de GitHub excedido. Reintenta más tarde."
+                        else -> "Error de GitHub: ${response.code}"
+                    }
+                    Result.failure(Exception(errorMsg))
                 }
             } catch (e: Exception) {
                 Result.failure(e)

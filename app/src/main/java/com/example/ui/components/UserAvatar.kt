@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
@@ -30,6 +31,8 @@ fun UserAvatar(
     borderWidth: Dp = 0.dp,
     borderColor: Color = Color.Transparent,
     isOnline: Boolean? = null,
+    hasStory: Boolean = false,
+    isStoryViewed: Boolean = false,
     contentDescription: String? = "Perfil de usuario"
 ) {
     var isImageError by remember(photoUrl) { mutableStateOf(false) }
@@ -38,11 +41,20 @@ fun UserAvatar(
         if (trimmed.isNullOrBlank() || trimmed == "null") null else trimmed
     }
 
-    val baseModifier = if (borderWidth > 0.dp) {
+    // Story ring color
+    val storyColor = if (hasStory) {
+        if (isStoryViewed) Color.Gray else Color(0xFFEF4444)
+    } else Color.Transparent
+
+    val finalBorderWidth = if (hasStory) 2.dp else borderWidth
+    val finalBorderColor = if (hasStory) storyColor else borderColor
+
+    val baseModifier = if (finalBorderWidth > 0.dp) {
         Modifier
             .size(size)
+            .padding(if (hasStory) 3.dp else 0.dp) // Gap for story ring
             .clip(CircleShape)
-            .border(borderWidth, borderColor, CircleShape)
+            .border(finalBorderWidth, finalBorderColor, CircleShape)
     } else {
         Modifier
             .size(size)
@@ -51,8 +63,17 @@ fun UserAvatar(
 
     Box(
         modifier = modifier.size(size),
-        contentAlignment = Alignment.BottomEnd
+        contentAlignment = Alignment.Center
     ) {
+        // Outer Story Ring
+        if (hasStory) {
+            Box(
+                modifier = Modifier
+                    .size(size)
+                    .border(2.dp, storyColor, CircleShape)
+            )
+        }
+
         Box(
             modifier = baseModifier
                 .fillMaxSize()

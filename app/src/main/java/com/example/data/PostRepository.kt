@@ -42,7 +42,7 @@ class PostRepository {
                 val username = data["username"] as? String ?: ""
                 val displayName = data["displayName"] as? String ?: username
                 val videoUrl = (data["videoUrl"] ?: data["url"]) as? String ?: ""
-                val thumbnailURL = (data["thumbnailURL"] ?: data["thumbnailUrl"] ?: data["thumbnail"]) as? String ?: ""
+                val thumbnailUrl = (data["thumbnailUrl"] ?: data["thumbnailURL"] ?: data["thumbnail"]) as? String ?: ""
                 val description = (data["description"] ?: data["caption"]) as? String ?: ""
                 val hashtags = (data["hashtags"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
                 val createdAt = when (val c = data["createdAt"]) {
@@ -64,7 +64,7 @@ class PostRepository {
                     username = username,
                     displayName = displayName,
                     videoUrl = videoUrl,
-                    thumbnailURL = thumbnailURL,
+                    thumbnailUrl = thumbnailUrl,
                     description = description,
                     hashtags = hashtags,
                     createdAt = createdAt,
@@ -140,8 +140,15 @@ class PostRepository {
 
     suspend fun getComments(videoId: String): Result<List<CommentResponse>> {
         return try {
+            val currentUid = auth.currentUser?.uid ?: ""
             val snapshot = db.collection("videos").document(videoId).collection("comments").orderBy("createdAt", Query.Direction.DESCENDING).get().await()
-            val comments = snapshot.documents.mapNotNull { it.toObject(CommentResponse::class.java) }
+            val comments = snapshot.documents.mapNotNull { doc ->
+                val comment = doc.toObject(CommentResponse::class.java) ?: return@mapNotNull null
+                val isLiked = if (currentUid.isNotEmpty()) {
+                    db.collection("comment_likes").document("${comment.commentId}_$currentUid").get().await().exists()
+                } else false
+                comment.copy(isLiked = isLiked)
+            }
             Result.success(comments)
         } catch (e: Exception) {
             Result.failure(e)
@@ -185,19 +192,49 @@ class PostRepository {
         }
     }
 
-    suspend fun likeComment(commentId: String): Result<LikeResponse> {
+    suspend fun likeComment(videoId: String, commentId: String): Result<LikeResponse> {
         return try {
             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
-            val ref = db.collection("comment_likes").document("${commentId}_$currentUid")
-            ref.set(mapOf("uid" to currentUid, "commentId" to commentId)).await()
-            Result.success(LikeResponse(true, 0))
+            val commentRef = db.collection("videos").document(videoId).collection("comments").document(commentId)
+            val likeRef = db.collection("comment_likes").document("${commentId}_$currentUid")
+            var newLikesCount = 0
+            db.runTransaction { transaction ->
+                val commentSnap = transaction.get(commentRef)
+                if (!commentSnap.exists()) return@runTransaction null
+                val likeSnap = transaction.get(likeRef)
+                var count = commentSnap.getLong("likesCount")?.toInt() ?: 0
+                if (!likeSnap.exists()) {
+                    transaction.set(likeRef, mapOf("uid" to currentUid, "commentId" to commentId, "createdAt" to System.currentTimeMillis()))
+                    count += 1
+                    transaction.update(commentRef, "likesCount", count)
+                }
+                newLikesCount = count
+                null
+            }.await()
+            Result.success(LikeResponse(true, newLikesCount))
         } catch (e: Exception) { Result.failure(e) }
     }
-    suspend fun unlikeComment(commentId: String): Result<LikeResponse> {
+
+    suspend fun unlikeComment(videoId: String, commentId: String): Result<LikeResponse> {
         return try {
             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
-            db.collection("comment_likes").document("${commentId}_$currentUid").delete().await()
-            Result.success(LikeResponse(false, 0))
+            val commentRef = db.collection("videos").document(videoId).collection("comments").document(commentId)
+            val likeRef = db.collection("comment_likes").document("${commentId}_$currentUid")
+            var newLikesCount = 0
+            db.runTransaction { transaction ->
+                val commentSnap = transaction.get(commentRef)
+                if (!commentSnap.exists()) return@runTransaction null
+                val likeSnap = transaction.get(likeRef)
+                var count = commentSnap.getLong("likesCount")?.toInt() ?: 0
+                if (likeSnap.exists()) {
+                    transaction.delete(likeRef)
+                    count = maxOf(0, count - 1)
+                    transaction.update(commentRef, "likesCount", count)
+                }
+                newLikesCount = count
+                null
+            }.await()
+            Result.success(LikeResponse(false, newLikesCount))
         } catch (e: Exception) { Result.failure(e) }
     }
 
@@ -246,25 +283,34 @@ class PostRepository {
                     return@withContext Pair(false, "Revisión automática no disponible. Una persona revisará tu denuncia pronto.")
                 }
 
-                val client = OkHttpClient()
-                val prompt = "Actúa como un moderador de IA para una red social llamada Momentos. Analiza este reporte de usuario:\nMotivo: $reason\nDetalles: ${description ?: "Ninguno"}\n\nDetermina si es una infracción grave (violencia, acoso, pornografía). Responde: 'APROBADA' o 'RECHAZADA' y luego el motivo breve."
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                val prompt = "Actúa como un moderador de IA para una red social llamada Momentos. Analiza este reporte de usuario:\nMotivo: $reason\nDetalles: ${description ?: "Ninguno"}\n\nDetermina si es una infracción grave (violencia, acoso, pornografía). Responde únicamente con: 'APROBADA' o 'RECHAZADA' seguido de un motivo muy breve."
 
                 val jsonBody = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
                 }
 
                 val request = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey")
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey")
                     .post(jsonBody.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
                 client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) return@withContext Pair(false, "Error de análisis.")
+                    if (!response.isSuccessful) return@withContext Pair(false, "Error de análisis. (HTTP ${response.code})")
                     val body = response.body?.string() ?: ""
-                    val text = JSONObject(body).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                    Pair(text.contains("APROBADA", true), text)
+                    val json = JSONObject(body)
+                    val candidates = json.optJSONArray("candidates")
+                    if (candidates != null && candidates.length() > 0) {
+                        val text = candidates.getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                        val isApproved = text.trim().startsWith("APROBADA", ignoreCase = true) || text.contains("APROBADA", ignoreCase = true)
+                        return@withContext Pair(isApproved, text)
+                    }
+                    Pair(false, "No se recibió respuesta válida de la IA.")
                 }
-            } catch (e: Exception) { Pair(false, "Error de red.") }
+            } catch (e: Exception) { Pair(false, "Error de red: ${e.message}") }
         }
     }
 
@@ -291,10 +337,10 @@ class PostRepository {
             // BACKGROUND AUTOMATION
             GlobalScope.launch(Dispatchers.IO) {
                 try {
-                    delay(15000) // Simular inicio de revisión
+                    delay(5000)
                     db.collection("reports").document(reportId).update("status", "reviewing_publication", "updatedAt", System.currentTimeMillis()).await()
                     
-                    delay(20000) // Simular análisis profundo
+                    delay(5000)
                     val (accepted, analysis) = analyzeReportWithGemini(reason, description)
                     
                     if (accepted) {
@@ -310,6 +356,12 @@ class PostRepository {
                     ).await()
                 } catch (e: Exception) {
                     android.util.Log.e("PostRepository", "Automated report flow failed: ${e.message}")
+                    db.collection("reports").document(reportId).update(
+                        "status", "resolved",
+                        "systemResult", "pending",
+                        "systemAnalysis", "Error en el sistema de IA. Un moderador revisará el caso.",
+                        "updatedAt", System.currentTimeMillis()
+                    ).await()
                 }
             }
             Result.success(Unit)
@@ -340,7 +392,7 @@ class PostRepository {
                         tRef.putFile(Uri.parse(localThumbnailUriString)).await()
                         tUrl = tRef.downloadUrl.await().toString()
                     }
-                    db.collection("videos").document(videoId).update("videoUrl", vUrl, "thumbnailURL", tUrl, "status", "READY").await()
+                    db.collection("videos").document(videoId).update("videoUrl", vUrl, "thumbnailUrl", tUrl, "status", "READY").await()
                 } catch (e: Exception) { db.collection("videos").document(videoId).update("status", "FAILED").await() }
             }
             Result.success(video)
@@ -387,6 +439,13 @@ class PostRepository {
         return try {
             val uid = auth.currentUser?.uid ?: return Result.failure(Exception("Not auth"))
             db.collection("story_views").document("${storyId}_$uid").set(mapOf("storyId" to storyId, "uid" to uid, "viewedAt" to System.currentTimeMillis())).await()
+            Result.success(Unit)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun deleteVideo(videoId: String): Result<Unit> {
+        return try {
+            db.collection("videos").document(videoId).delete().await()
             Result.success(Unit)
         } catch (e: Exception) { Result.failure(e) }
     }

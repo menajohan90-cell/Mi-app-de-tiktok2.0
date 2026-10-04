@@ -49,7 +49,7 @@ object LocalVideoManager {
                 obj.put("username", v.username)
                 obj.put("displayName", v.displayName)
                 obj.put("videoUrl", v.videoUrl)
-                obj.put("thumbnailURL", v.thumbnailURL)
+                obj.put("thumbnailUrl", v.thumbnailUrl)
                 obj.put("description", v.description)
                 
                 val hashArray = JSONArray()
@@ -93,7 +93,7 @@ object LocalVideoManager {
                         username = obj.optString("username"),
                         displayName = obj.optString("displayName"),
                         videoUrl = obj.optString("videoUrl"),
-                        thumbnailURL = obj.optString("thumbnailURL"),
+                        thumbnailUrl = obj.optString("thumbnailUrl"),
                         description = obj.optString("description"),
                         hashtags = hashtagsList,
                         createdAt = obj.optLong("createdAt"),

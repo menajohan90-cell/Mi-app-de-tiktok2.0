@@ -6,7 +6,7 @@ data class VideoModel(
     val username: String = "",
     val displayName: String = "",
     val videoUrl: String = "",
-    val thumbnailURL: String = "",
+    val thumbnailUrl: String = "",
     val description: String = "",
     val hashtags: List<String> = emptyList(),
     val createdAt: Long = 0L,

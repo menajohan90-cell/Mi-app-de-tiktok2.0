@@ -26,6 +26,7 @@ import androidx.navigation.NavController
 import com.example.data.UserBrief
 import com.example.data.UserRepository
 import com.example.data.ProfileResponse
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -141,6 +142,7 @@ fun AdminUserOptionsDialog(
     var isVerified by remember { mutableStateOf(user.isVerified) }
     var isSinger by remember { mutableStateOf(user.isSinger) }
     var isCrown by remember { mutableStateOf(user.isCrown) }
+    var isCreator by remember { mutableStateOf(user.isCreator) }
     
     var showSuspendOptions by remember { mutableStateOf(false) }
 
@@ -162,6 +164,10 @@ fun AdminUserOptionsDialog(
                     Checkbox(checked = isCrown, onCheckedChange = { isCrown = it })
                     Text("Corona (Badge Dorado)", color = Color.White)
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = isCreator, onCheckedChange = { isCreator = it })
+                    Text("Insignia Creador (SVG)", color = Color.White)
+                }
                 
                 Spacer(modifier = Modifier.height(16.dp))
                 
@@ -176,7 +182,10 @@ fun AdminUserOptionsDialog(
                 }
                 
                 if (user.suspended) {
-                    Text("Actualmente suspendido", color = Color(0xFFEF4444), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+                    val daysLeft = if (user.suspendedUntil > System.currentTimeMillis()) {
+                        (user.suspendedUntil - System.currentTimeMillis()) / (24 * 60 * 60 * 1000)
+                    } else 0
+                    Text("Suspendido (${daysLeft} días restantes)", color = Color(0xFFEF4444), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
                 }
             }
         },
@@ -184,7 +193,9 @@ fun AdminUserOptionsDialog(
             Button(onClick = {
                 scope.launch {
                     userRepository.setUserBadges(user.uid, isVerified, isSinger, isCrown)
-                    Toast.makeText(context, "Insignias actualizadas", Toast.LENGTH_SHORT).show()
+                    // Update isCreator
+                    com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users").document(user.uid).update("isCreator", isCreator).await()
+                    Toast.makeText(context, "Datos actualizados", Toast.LENGTH_SHORT).show()
                     onUpdate()
                 }
             }) {

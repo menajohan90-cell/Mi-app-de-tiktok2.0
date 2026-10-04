@@ -724,10 +724,31 @@ fun LoggedInView(
 
         // Video grid
         val displayVideos = if (selectedTabIndex == 0) userVideos else sharedVideos
+        val isOwnProfile = targetUid == null || targetUid == FirebaseAuth.getInstance().currentUser?.uid
         
         if (displayVideos.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (selectedTabIndex == 0) "No tienes videos." else "No has compartido videos.", color = Color.Gray)
+            Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val emptyMsg = if (selectedTabIndex == 1) {
+                        "No has compartido videos."
+                    } else if (isOwnProfile) {
+                        "Publica un video y hazlo real :)"
+                    } else {
+                        "Este usuario no tiene videos, estás al día"
+                    }
+                    Text(emptyMsg, color = Color.Gray, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    
+                    if (isOwnProfile && selectedTabIndex == 0) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { navController.navigate("publish") },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Publicar ahora", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         } else {
             androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
@@ -745,8 +766,10 @@ fun LoggedInView(
                 ) {
                     AsyncImage(
                         model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-                            .data(if (video.thumbnailURL.isNotBlank()) video.thumbnailURL else video.videoUrl)
+                            .data(video.thumbnailUrl.ifBlank { video.videoUrl })
                             .crossfade(true)
+                            .placeholder(android.R.drawable.progress_horizontal)
+                            .error(android.R.drawable.ic_menu_gallery)
                             .build(),
                         contentDescription = "Thumbnail",
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,

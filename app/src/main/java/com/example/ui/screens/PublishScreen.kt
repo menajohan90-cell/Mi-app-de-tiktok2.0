@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.AsyncImage
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
@@ -70,6 +72,17 @@ fun PublishScreen(navController: NavController) {
     var uploadProgress by remember { mutableStateOf(0f) }
     
     var currentUserProfile by remember { mutableStateOf<ProfileResponse?>(null) }
+    
+    var customThumbnailUri by remember { mutableStateOf<Uri?>(null) }
+    var isPickingThumbnailFromGallery by remember { mutableStateOf(false) }
+
+    val thumbnailGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            customThumbnailUri = uri
+        }
+    }
     
     LaunchedEffect(auth.currentUser) {
         val user = auth.currentUser
@@ -192,6 +205,14 @@ fun PublishScreen(navController: NavController) {
                 }
 
                 // Video Preview (mini ExoPlayer)
+                Text(
+                    "Escoge la miniatura del video",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -205,6 +226,7 @@ fun PublishScreen(navController: NavController) {
                             repeatMode = Player.REPEAT_MODE_ONE
                         }
                     }
+                    var currentPosition by remember { mutableStateOf(0L) }
                     
                     LaunchedEffect(selectedMediaUri) {
                         if (selectedMediaUri != null) {
@@ -227,20 +249,58 @@ fun PublishScreen(navController: NavController) {
                         }
                     }
                     
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                player = exoPlayer
-                                useController = true
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                layoutParams = FrameLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        update = { it.player = exoPlayer }
+                    if (customThumbnailUri != null) {
+                        AsyncImage(
+                            model = customThumbnailUri,
+                            contentDescription = "Miniatura personalizada",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                        IconButton(
+                            onClick = { customThumbnailUri = null },
+                            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Quitar foto", tint = Color.White)
+                        }
+                    } else {
+                        AndroidView(
+                            factory = { ctx ->
+                                PlayerView(ctx).apply {
+                                    player = exoPlayer
+                                    useController = true
+                                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                    layoutParams = FrameLayout.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            update = { it.player = exoPlayer }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Button(
+                    onClick = { thumbnailGalleryLauncher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                    shape = RoundedCornerShape(8.dp),
+                    enabled = !isUploading
+                ) {
+                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Usar foto de la galería como portada")
+                }
+
+                if (customThumbnailUri == null) {
+                    Text(
+                        "Pausa el video en la parte que desees como miniatura",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
                 }
 
@@ -320,9 +380,14 @@ fun PublishScreen(navController: NavController) {
                                 val localFileUriString = Uri.fromFile(java.io.File(localVideoPath)).toString()
                                 
                                 // Generate Thumbnail
-                                val thumbBitmap = ThumbnailUtils.generateVideoThumbnail(context, Uri.parse(localFileUriString))
-                                val thumbFile = if (thumbBitmap != null) ThumbnailUtils.saveBitmapToCache(context, thumbBitmap, "thumb_$videoId") else null
-                                val thumbUriString = if (thumbFile != null) Uri.fromFile(thumbFile).toString() else null
+                                val thumbUriString = if (customThumbnailUri != null) {
+                                    customThumbnailUri.toString()
+                                } else {
+                                    // Use current frame logic or just general generation
+                                    val thumbBitmap = ThumbnailUtils.generateVideoThumbnail(context, Uri.parse(localFileUriString))
+                                    val thumbFile = if (thumbBitmap != null) ThumbnailUtils.saveBitmapToCache(context, thumbBitmap, "thumb_$videoId") else null
+                                    if (thumbFile != null) Uri.fromFile(thumbFile).toString() else null
+                                }
 
                                 scope.launch {
                                     try {
