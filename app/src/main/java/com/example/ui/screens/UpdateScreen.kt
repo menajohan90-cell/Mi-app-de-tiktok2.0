@@ -350,6 +350,90 @@ fun UpdateScreen(navController: androidx.navigation.NavController) {
                                     modifier = Modifier
                                         .size(36.dp)
                                         .clip(CircleShape)
+                                        .background(Color(0xFF22C55E).copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(20.dp))
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Auto-Sincronizar con GitHub",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                    Text(
+                                        text = "Actualización profesional ultra rápida",
+                                        color = Color(0xFFA1A1AA),
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            var githubRepoPath by remember { mutableStateOf("") }
+                            var isCheckingGithub by remember { mutableStateOf(false) }
+
+                            OutlinedTextField(
+                                value = githubRepoPath,
+                                onValueChange = { githubRepoPath = it },
+                                placeholder = { Text("usuario/repositorio", color = Color.Gray) },
+                                label = { Text("Tu Repositorio de GitHub", color = Color.Gray) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFF22C55E),
+                                    unfocusedBorderColor = Color(0xFF3F3F46)
+                                )
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Button(
+                                onClick = {
+                                    if (githubRepoPath.isBlank()) {
+                                        Toast.makeText(context, "Escribe tu usuario/repo (ej: MenaJohan/Momentos)", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    isCheckingGithub = true
+                                    scope.launch {
+                                        val result = updateRepository.getGitHubLatestRelease(githubRepoPath)
+                                        isCheckingGithub = false
+                                        result.onSuccess { url ->
+                                            Toast.makeText(context, "¡Nueva versión encontrada en GitHub!", Toast.LENGTH_SHORT).show()
+                                            startDownload(url)
+                                        }.onFailure { e ->
+                                            Toast.makeText(context, "GitHub: ${e.message}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                                modifier = Modifier.fillMaxWidth().height(46.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                enabled = !isCheckingGithub
+                            ) {
+                                if (isCheckingGithub) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
+                                } else {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Buscar Actualización en GitHub")
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(20.dp))
+                            HorizontalDivider(color = Color(0xFF27272A))
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
                                         .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {

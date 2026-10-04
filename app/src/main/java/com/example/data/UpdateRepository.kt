@@ -48,6 +48,15 @@ class UpdateRepository {
                 .replace("?dl=0", "")
                 .replace("&dl=0", "")
         }
+        // Convert GitHub release/blob to raw download
+        if (trimmed.contains("github.com") && !trimmed.contains("objects/githubusercontent.com")) {
+            if (trimmed.contains("/releases/download/")) {
+                return trimmed // Ya es descarga directa
+            }
+            if (trimmed.contains("/blob/")) {
+                return trimmed.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+            }
+        }
         return trimmed
     }
 
@@ -81,6 +90,35 @@ class UpdateRepository {
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun getGitHubLatestRelease(repoPath: String): Result<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                // repoPath ej: "usuario/mi-repositorio"
+                val url = "https://api.github.com/repos/$repoPath/releases/latest"
+                val client = OkHttpClient()
+                val request = Request.Builder().url(url).build()
+                val response = client.newCall(request).execute()
+                
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: ""
+                    // Búsqueda simple del primer browser_download_url que termine en .apk
+                    val regex = Regex("\"browser_download_url\":\\s*\"(.*?\\.apk)\"")
+                    val match = regex.find(body)
+                    val apkUrl = match?.groupValues?.get(1)
+                    if (apkUrl != null) {
+                        Result.success(apkUrl)
+                    } else {
+                        Result.failure(Exception("No se encontró archivo APK en el Release de GitHub"))
+                    }
+                } else {
+                    Result.failure(Exception("Error al consultar GitHub: ${response.code}"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
         }
     }
 
