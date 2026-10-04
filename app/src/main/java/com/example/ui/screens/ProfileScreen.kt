@@ -473,12 +473,18 @@ fun LoggedInView(
                 
         Spacer(modifier = Modifier.height(16.dp))
                 
-        Text(
-            text = "@${profileData?.username ?: "usuario"}",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "@${profileData?.username ?: "usuario"}",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            if (profileData?.isCreator == true) {
+                Spacer(modifier = Modifier.width(6.dp))
+                CreatorBadge()
+            }
+        }
                 
         Spacer(modifier = Modifier.height(8.dp))
                 
@@ -949,6 +955,28 @@ fun GlowingWingsBackground(modifier: Modifier = Modifier) {
         
         drawPath(leftWingPath, color = Color(0xFFFFD700).copy(alpha = 0.5f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
         drawPath(rightWingPath, color = Color(0xFFFFD700).copy(alpha = 0.5f), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5.dp.toPx()))
+    }
+}
+
+@Composable
+fun CreatorBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(20.dp)
+            .clip(CircleShape)
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    colors = listOf(Color(0xFF3B82F6), Color(0xFF2563EB))
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = "Creador Verificado",
+            tint = Color.White,
+            modifier = Modifier.size(14.dp)
+        )
     }
 }
 

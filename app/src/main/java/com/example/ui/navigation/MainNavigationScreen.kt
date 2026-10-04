@@ -40,7 +40,8 @@ import kotlinx.coroutines.delay
 import android.net.Uri
 import com.example.ui.screens.StoryEditorScreen
 import com.example.ui.screens.StoryViewScreen
-
+import com.example.data.UpdateRepository
+import kotlinx.coroutines.launch
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -145,6 +146,10 @@ fun VideoSplashScreen(onTimeout: (Boolean) -> Unit) {
 fun MainNavigationScreen() {
     var showSplash by remember { mutableStateOf(true) }
     var startRoute by remember { mutableStateOf(BottomNavItem.Inicio.route) }
+    val updateRepository = remember { UpdateRepository() }
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var githubUpdateUrl by remember { mutableStateOf<String?>(null) }
 
     if (showSplash) {
         VideoSplashScreen(onTimeout = { isLoggedIn ->
@@ -155,6 +160,25 @@ fun MainNavigationScreen() {
     }
 
     val navController = rememberNavController()
+    val context = LocalContext.current
+
+    // Auto-check for GitHub updates
+    LaunchedEffect(Unit) {
+        scope.launch {
+            delay(8000) // Esperar a que la app cargue
+            updateRepository.getGitHubLatestRelease("menajohan90-cell/Mi-app-de-tiktok2.0").onSuccess { url ->
+                githubUpdateUrl = url
+                val result = snackbarHostState.showSnackbar(
+                    message = "¡Nueva actualización disponible en GitHub!",
+                    actionLabel = "Ver",
+                    duration = SnackbarDuration.Long
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    navController.navigate("update_screen")
+                }
+            }
+        }
+    }
     
     val items = listOf(
         BottomNavItem.Inicio,
@@ -179,6 +203,7 @@ fun MainNavigationScreen() {
         }
     ) {
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 if (showBottomNav) {
                     Column {

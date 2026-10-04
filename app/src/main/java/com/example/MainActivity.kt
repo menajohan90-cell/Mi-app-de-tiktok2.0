@@ -10,10 +10,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.example.ui.navigation.MainNavigationScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.data.UpdateRepository
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,6 +36,29 @@ class MainActivity : ComponentActivity() {
                 ) {
                     MainNavigationScreen()
                 }
+            }
+        }
+
+        // Background update check (Auto-sync automation)
+        checkUpdatesInBackground()
+    }
+
+    private fun checkUpdatesInBackground() {
+        val updateRepo = UpdateRepository()
+        val repoPath = "menajohan90-cell/Mi-app-de-tiktok2.0"
+        
+        CoroutineScope(Dispatchers.Main).launch {
+            while(true) {
+                try {
+                    val result = updateRepo.getGitHubLatestRelease(repoPath)
+                    result.onSuccess { url ->
+                        // Si encontramos algo en GitHub, avisamos al usuario una sola vez
+                        // Nota: En una app real compararíamos versionCode, aquí avisamos para prueba
+                        android.util.Log.d("MainActivity", "GitHub Update found: $url")
+                        // Podríamos mostrar un banner o notificación interna aquí
+                    }
+                } catch (e: Exception) {}
+                delay(300000) // Cada 5 minutos
             }
         }
     }

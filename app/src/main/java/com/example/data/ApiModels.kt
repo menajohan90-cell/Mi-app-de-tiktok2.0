@@ -39,7 +39,8 @@ data class ProfileResponse(
     val email: String = "",
     val isVerified: Boolean = false,
     val isSinger: Boolean = false,
-    val isCrown: Boolean = false
+    val isCrown: Boolean = false,
+    val isCreator: Boolean = false
 )
 
 data class UserBrief(

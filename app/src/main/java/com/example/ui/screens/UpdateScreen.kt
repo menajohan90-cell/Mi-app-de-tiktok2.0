@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.AppUpdateModel
@@ -34,8 +35,10 @@ import java.io.File
 fun UpdateScreen(navController: androidx.navigation.NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val clipboardManager = LocalClipboardManager.current
     val updateRepository = remember { UpdateRepository() }
+
+    // RUTA DE TU REPOSITORIO
+    val GITHUB_REPO = "menajohan90-cell/Mi-app-de-tiktok2.0"
 
     var isLoading by remember { mutableStateOf(true) }
     var isChecking by remember { mutableStateOf(false) }
@@ -49,45 +52,21 @@ fun UpdateScreen(navController: androidx.navigation.NavController) {
     var downloadedBytesText by remember { mutableStateOf("") }
     var downloadComplete by remember { mutableStateOf(false) }
 
-    // Diálogo para configurar enlace de descarga directo
-    var showConfigUrlDialog by remember { mutableStateOf(false) }
-    var inputApkUrl by remember { mutableStateOf("") }
-    var isSavingUrl by remember { mutableStateOf(false) }
-    var pendingActionAfterSave by remember { mutableStateOf<String?>(null) }
-
-    fun fetchUpdate(isManual: Boolean = false) {
-        scope.launch {
-            if (isManual) isChecking = true else isLoading = true
-            checkError = null
-            val result = updateRepository.getLatestUpdate()
-            result.onSuccess { update ->
-                latestUpdate = update
-                if (!update?.apkUrl.isNullOrBlank()) {
-                    inputApkUrl = update!!.apkUrl
-                }
-            }.onFailure { e ->
-                checkError = e.message ?: "Error de conexión"
-            }
-            isLoading = false
-            isChecking = false
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        fetchUpdate(false)
-    }
-
-    val remoteCode = latestUpdate?.versionCode ?: localVersionCode
-    val hasNewVersion = latestUpdate != null && remoteCode > localVersionCode
-    val scrollState = rememberScrollState()
+    // GitHub Sync State
+    var githubApkUrl by remember { mutableStateOf<String?>(null) }
+    var isCheckingGithub by remember { mutableStateOf(false) }
+    
+    // Dialog State
+    var showUpdateConfirmDialog by remember { mutableStateOf(false) }
+    var selectedApkUrl by remember { mutableStateOf("") }
 
     fun startDownload(urlToUse: String) {
         if (urlToUse.isBlank()) {
-            pendingActionAfterSave = "download"
-            showConfigUrlDialog = true
+            Toast.makeText(context, "URL no válida", Toast.LENGTH_SHORT).show()
             return
         }
         isDownloading = true
+        downloadComplete = false
         scope.launch {
             val result = updateRepository.downloadAndInstallApk(
                 context = context,
@@ -102,17 +81,53 @@ fun UpdateScreen(navController: androidx.navigation.NavController) {
             isDownloading = false
             result.onSuccess {
                 downloadComplete = true
+                Toast.makeText(context, "Descarga completada.", Toast.LENGTH_SHORT).show()
             }.onFailure { e ->
-                Toast.makeText(context, "Error al descargar: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
+
+    fun fetchUpdates() {
+        scope.launch {
+            isChecking = true
+            checkError = null
+            
+            // Check Firebase
+            updateRepository.getLatestUpdate().onSuccess { update ->
+                latestUpdate = update
+            }
+
+            // Check GitHub
+            isCheckingGithub = true
+            updateRepository.getGitHubLatestRelease(GITHUB_REPO).onSuccess { url ->
+                githubApkUrl = url
+            }.onFailure {
+                githubApkUrl = null
+            }
+            
+            isCheckingGithub = false
+            isChecking = false
+            isLoading = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        fetchUpdates()
+    }
+
+    val hasGithubUpdate = githubApkUrl != null
+    val remoteCode = latestUpdate?.versionCode ?: localVersionCode
+    val hasFirebaseUpdate = latestUpdate != null && remoteCode > localVersionCode
+    val anyUpdateFound = hasGithubUpdate || hasFirebaseUpdate
+    
+    val scrollState = rememberScrollState()
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { 
-                    Text("Actualizaciones", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) 
+                    Text("Centro de Instalación", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp) 
                 },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
@@ -120,8 +135,8 @@ fun UpdateScreen(navController: androidx.navigation.NavController) {
                     }
                 },
                 actions = {
-                    IconButton(onClick = { fetchUpdate(true) }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Buscar actualizaciones", tint = Color.White)
+                    IconButton(onClick = { fetchUpdates() }) {
+                        Icon(if (isChecking) Icons.Default.Sync else Icons.Default.Refresh, contentDescription = "Sincronizar", tint = Color(0xFF22C55E))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black)
@@ -129,550 +144,216 @@ fun UpdateScreen(navController: androidx.navigation.NavController) {
         },
         containerColor = Color.Black
     ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp)) {
-            if (isLoading || isChecking) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(color = Color(0xFF3B82F6))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = if (isChecking) "Comprobando actualizaciones..." else "Cargando información...",
-                        color = Color.LightGray,
-                        fontSize = 14.sp
-                    )
-                }
-            } else if (checkError != null) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color.Red, modifier = Modifier.size(54.dp))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("No se pudo comprobar la actualización", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(checkError ?: "", color = Color.Gray, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                    Spacer(modifier = Modifier.height(20.dp))
-                    Button(
-                        onClick = { fetchUpdate(true) },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Reintentar", color = Color.White)
-                    }
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            if (isLoading) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Color(0xFF22C55E))
                 }
             } else {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
-                        .padding(bottom = 24.dp),
+                        .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Tarjeta Principal de Estado de Versión
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF27272A), RoundedCornerShape(18.dp))
+                    // --- CABECERA DE ESTADO ---
+                    Spacer(modifier = Modifier.height(20.dp))
+                    
+                    Box(
+                        modifier = Modifier
+                            .size(100.dp)
+                            .clip(CircleShape)
+                            .background(if (anyUpdateFound) Color(0xFF22C55E).copy(alpha = 0.1f) else Color(0xFF3F3F46).copy(alpha = 0.1f)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(modifier = Modifier.padding(20.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(52.dp)
-                                        .clip(CircleShape)
-                                        .background(if (hasNewVersion) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFF10B981).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (hasNewVersion) {
-                                        Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(28.dp))
-                                    } else {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(28.dp))
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column {
-                                    Text(
-                                        text = if (hasNewVersion) "¡Nueva versión lista!" else "Tu aplicación está al día",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 17.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(3.dp))
-                                    Text(
-                                        text = "Instalada: v$localVersionName (código $localVersionCode)",
-                                        color = Color(0xFFA1A1AA),
-                                        fontSize = 13.sp
-                                    )
-                                }
-                            }
+                        Icon(
+                            imageVector = if (anyUpdateFound) Icons.Default.SystemUpdate else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (anyUpdateFound) Color(0xFF22C55E) else Color.Gray,
+                            modifier = Modifier.size(50.dp)
+                        )
+                    }
 
-                            if (hasNewVersion && latestUpdate != null) {
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = if (anyUpdateFound) "¡Actualización Encontrada!" else "No se encontró actualización o parche de seguridad",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = if (anyUpdateFound) "Hay una nueva versión lista para instalar en tu dispositivo." else "Tu aplicación Momentos ya cuenta con todas las novedades y parches instalados.",
+                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(40.dp))
+
+                    // --- ACCIONES SI HAY ACTUALIZACIÓN ---
+                    if (anyUpdateFound) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF27272A), RoundedCornerShape(24.dp))
+                        ) {
+                            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Información de la entrega", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                }
+                                
                                 Spacer(modifier = Modifier.height(16.dp))
-                                HorizontalDivider(color = Color(0xFF27272A))
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = "Disponible: v${latestUpdate!!.versionName}",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
-                                    if (latestUpdate!!.securityPatch || latestUpdate!!.updateType.contains("Parche", true)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier
-                                                .background(Color(0xFFF59E0B).copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                        ) {
-                                            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFFF59E0B), modifier = Modifier.size(14.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(text = "Parche", color = Color(0xFFF59E0B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
+                                
+                                if (hasGithubUpdate) {
+                                    UpdateItemRow("Fuente", "GitHub (Auto-Sync)")
+                                    UpdateItemRow("Estado", "Lista para instalar")
+                                } else {
+                                    UpdateItemRow("Versión", latestUpdate?.versionName ?: "Nueva")
+                                    UpdateItemRow("Tipo", latestUpdate?.updateType ?: "Oficial")
                                 }
+                                
+                                Spacer(modifier = Modifier.height(24.dp))
 
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Código de versión: ${latestUpdate!!.versionCode} • Fecha: ${latestUpdate!!.releaseDate.ifBlank { "Reciente" }}",
-                                    color = Color(0xFFA1A1AA),
-                                    fontSize = 12.sp
-                                )
-                                if (latestUpdate!!.fileSize.isNotBlank()) {
-                                    Text(
-                                        text = "Tamaño del archivo: ${latestUpdate!!.fileSize}",
-                                        color = Color(0xFFA1A1AA),
-                                        fontSize = 12.sp
-                                    )
-                                }
-
-                                if (latestUpdate!!.releaseNotes.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text(
-                                        text = "Novedades:",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = latestUpdate!!.releaseNotes,
-                                        color = Color(0xFFA1A1AA),
-                                        fontSize = 13.sp,
-                                        lineHeight = 18.sp
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(20.dp))
-
-                                // Proceso de descarga o botón de actualización directa
                                 if (isDownloading) {
-                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                        LinearProgressIndicator(
-                                            progress = { downloadProgress },
-                                            color = Color(0xFF3B82F6),
-                                            trackColor = Color(0xFF27272A),
-                                            modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = "${(downloadProgress * 100).toInt()}% descargando...",
-                                                color = Color.White,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                            Text(
-                                                text = downloadedBytesText,
-                                                color = Color(0xFFA1A1AA),
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                    }
+                                    DownloadProgressView(downloadProgress, downloadedBytesText)
                                 } else if (downloadComplete) {
                                     Button(
                                         onClick = {
                                             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
                                             val apkFile = File(downloadsDir, "update_latest.apk")
-                                            if (apkFile.exists()) {
-                                                updateRepository.installApk(context, apkFile)
-                                            } else {
-                                                Toast.makeText(context, "Archivo APK no encontrado", Toast.LENGTH_SHORT).show()
-                                            }
+                                            updateRepository.installApk(context, apkFile)
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                                        shape = RoundedCornerShape(12.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                                        shape = RoundedCornerShape(16.dp)
                                     ) {
-                                        Icon(Icons.Default.InstallMobile, contentDescription = null, tint = Color.White)
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Instalar actualización ahora", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Icon(Icons.Default.InstallMobile, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text("INSTALAR AHORA", fontWeight = FontWeight.Black, fontSize = 16.sp)
                                     }
                                 } else {
                                     Button(
-                                        onClick = {
-                                            val apkUrl = latestUpdate?.apkUrl ?: ""
-                                            startDownload(apkUrl)
+                                        onClick = { 
+                                            selectedApkUrl = githubApkUrl ?: latestUpdate?.apkUrl ?: ""
+                                            showUpdateConfirmDialog = true
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
-                                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                                        shape = RoundedCornerShape(12.dp)
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
+                                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                                        shape = RoundedCornerShape(16.dp)
                                     ) {
-                                        Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.White)
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("1-Clic: Actualizar directamente", color = Color.White, fontWeight = FontWeight.Bold)
+                                        Icon(Icons.Default.Download, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text("ACTUALIZAR E INSTALAR", fontWeight = FontWeight.Black, fontSize = 16.sp)
                                     }
                                 }
                             }
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // SECCIÓN DE MÉTODOS ALTERNATIVOS SIN CABLE USB
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF18181B)),
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF27272A), RoundedCornerShape(18.dp))
-                    ) {
-                        Column(modifier = Modifier.padding(20.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF22C55E).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Sync, contentDescription = null, tint = Color(0xFF22C55E), modifier = Modifier.size(20.dp))
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "Auto-Sincronizar con GitHub",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                    Text(
-                                        text = "Actualización profesional ultra rápida",
-                                        color = Color(0xFFA1A1AA),
-                                        fontSize = 12.sp
-                                    )
-                                }
+                    } else {
+                        // --- BOTÓN DE REINTENTAR SI NO HAY NADA ---
+                        OutlinedButton(
+                            onClick = { fetchUpdates() },
+                            modifier = Modifier.fillMaxWidth().height(54.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27272A)),
+                            enabled = !isChecking
+                        ) {
+                            if (isChecking) {
+                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Comprobar de nuevo", color = Color.White)
                             }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            var githubRepoPath by remember { mutableStateOf("") }
-                            var isCheckingGithub by remember { mutableStateOf(false) }
-
-                            OutlinedTextField(
-                                value = githubRepoPath,
-                                onValueChange = { githubRepoPath = it },
-                                placeholder = { Text("usuario/repositorio", color = Color.Gray) },
-                                label = { Text("Tu Repositorio de GitHub", color = Color.Gray) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFF22C55E),
-                                    unfocusedBorderColor = Color(0xFF3F3F46)
-                                )
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Button(
-                                onClick = {
-                                    if (githubRepoPath.isBlank()) {
-                                        Toast.makeText(context, "Escribe tu usuario/repo (ej: MenaJohan/Momentos)", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    isCheckingGithub = true
-                                    scope.launch {
-                                        val result = updateRepository.getGitHubLatestRelease(githubRepoPath)
-                                        isCheckingGithub = false
-                                        result.onSuccess { url ->
-                                            Toast.makeText(context, "¡Nueva versión encontrada en GitHub!", Toast.LENGTH_SHORT).show()
-                                            startDownload(url)
-                                        }.onFailure { e ->
-                                            Toast.makeText(context, "GitHub: ${e.message}", Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E)),
-                                modifier = Modifier.fillMaxWidth().height(46.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                enabled = !isCheckingGithub
-                            ) {
-                                if (isCheckingGithub) {
-                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp))
-                                } else {
-                                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Buscar Actualización en GitHub")
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(20.dp))
-                            HorizontalDivider(color = Color(0xFF27272A))
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.UsbOff, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(20.dp))
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(
-                                        text = "Actualizar SIN cable USB",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                    Text(
-                                        text = "Descarga directa a tu teléfono por internet",
-                                        color = Color(0xFFA1A1AA),
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // Opción 1: Abrir enlace en el Navegador (Chrome)
-                            OutlinedButton(
-                                onClick = {
-                                    val apkUrl = latestUpdate?.apkUrl ?: ""
-                                    if (apkUrl.isNotBlank()) {
-                                        updateRepository.openInBrowser(context, apkUrl)
-                                    } else {
-                                        pendingActionAfterSave = "browser"
-                                        showConfigUrlDialog = true
-                                    }
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3F3F46)),
-                                modifier = Modifier.fillMaxWidth().height(46.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Descargar desde Navegador (Chrome)", fontSize = 13.sp)
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Opción 2: Compartir / Enviar enlace (WhatsApp / Drive / Telegram)
-                            OutlinedButton(
-                                onClick = {
-                                    val apkUrl = latestUpdate?.apkUrl ?: ""
-                                    if (apkUrl.isNotBlank()) {
-                                        updateRepository.shareDownloadLink(context, apkUrl, latestUpdate?.versionName ?: "nueva")
-                                    } else {
-                                        pendingActionAfterSave = "share"
-                                        showConfigUrlDialog = true
-                                    }
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3F3F46)),
-                                modifier = Modifier.fillMaxWidth().height(46.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Compartir enlace de descarga", fontSize = 13.sp)
-                            }
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Opción 3: Copiar enlace al portapapeles
-                            OutlinedButton(
-                                onClick = {
-                                    val apkUrl = latestUpdate?.apkUrl ?: ""
-                                    if (apkUrl.isNotBlank()) {
-                                        clipboardManager.setText(AnnotatedString(updateRepository.formatDirectDownloadUrl(apkUrl)))
-                                        Toast.makeText(context, "Enlace copiado al portapapeles", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        pendingActionAfterSave = "copy"
-                                        showConfigUrlDialog = true
-                                    }
-                                },
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3F3F46)),
-                                modifier = Modifier.fillMaxWidth().height(46.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Copiar enlace del APK", fontSize = 13.sp)
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // Botón para configurar / cambiar el enlace del APK
-                            Button(
-                                onClick = {
-                                    pendingActionAfterSave = null
-                                    showConfigUrlDialog = true
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF27272A)),
-                                modifier = Modifier.fillMaxWidth().height(46.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.Link, contentDescription = null, tint = Color(0xFF38BDF8), modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Pegar o Cambiar URL del APK", color = Color(0xFF38BDF8), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // Guía clara paso a paso
-                            Text(
-                                text = "Instrucciones para tener tu APK sin cable:",
-                                color = Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 13.sp
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "1. Sube tu archivo APK a Google Drive o Dropbox (enlace público) o copia el link de tu compilación.\n2. Toca 'Pegar o Cambiar URL del APK' y pega el enlace.\n3. ¡Listo! Pulsa '1-Clic: Actualizar directamente' o 'Descargar desde Navegador'. Tu teléfono se actualizará inmediatamente sin conectar ningún cable USB.",
-                                color = Color(0xFFA1A1AA),
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp
-                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(32.dp))
 
-                    // Botón para volver a comprobar
-                    OutlinedButton(
-                        onClick = { fetchUpdate(true) },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF27272A)),
-                        modifier = Modifier.fillMaxWidth().height(46.dp),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Volver a comprobar actualizaciones", fontSize = 13.sp)
-                    }
+                    // --- PIE DE PÁGINA ---
+                    Text(
+                        text = "Versión actual: v$localVersionName (código $localVersionCode)",
+                        color = Color.DarkGray,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
 
-        // Diálogo para ingresar / configurar el enlace del APK
-        if (showConfigUrlDialog) {
+        // DIÁLOGO DE CONFIRMACIÓN
+        if (showUpdateConfirmDialog) {
             AlertDialog(
-                onDismissRequest = { 
-                    if (!isSavingUrl) showConfigUrlDialog = false 
-                },
+                onDismissRequest = { showUpdateConfirmDialog = false },
                 title = { 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Link, contentDescription = null, tint = Color(0xFF3B82F6))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Enlace de descarga del APK", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = Color(0xFF22C55E))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Confirmar Instalación", color = Color.White)
                     }
                 },
                 text = {
-                    Column {
-                        Text(
-                            text = "Pega aquí el enlace donde subiste el APK (Google Drive, Dropbox, GitHub Releases, MediaFire o cualquier enlace directo):\n\nSi usas Google Drive, asegúrate de poner el enlace como 'Cualquier persona con el enlace'. La aplicación lo convertirá automáticamente en descarga directa.",
-                            color = Color(0xFFA1A1AA),
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
-                        OutlinedTextField(
-                            value = inputApkUrl,
-                            onValueChange = { inputApkUrl = it },
-                            placeholder = { Text("https://drive.google.com/file/d/...", color = Color.Gray) },
-                            label = { Text("URL del APK", color = Color.Gray) },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF3B82F6),
-                                unfocusedBorderColor = Color(0xFF3F3F46),
-                                focusedContainerColor = Color(0xFF18181B),
-                                unfocusedContainerColor = Color(0xFF18181B)
-                            )
-                        )
-                    }
+                    Text(
+                        "Se procederá a descargar e instalar el nuevo parche de seguridad o actualización. ¿Deseas continuar?",
+                        color = Color.LightGray
+                    )
                 },
                 confirmButton = {
                     Button(
                         onClick = {
-                            if (inputApkUrl.isBlank()) {
-                                Toast.makeText(context, "Por favor escribe o pega un enlace", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            isSavingUrl = true
-                            scope.launch {
-                                val saveResult = updateRepository.setApkUrl(inputApkUrl)
-                                isSavingUrl = false
-                                saveResult.onSuccess {
-                                    Toast.makeText(context, "¡Enlace del APK guardado correctamente!", Toast.LENGTH_LONG).show()
-                                    showConfigUrlDialog = false
-                                    fetchUpdate(true)
-
-                                    // Ejecutar la acción pendiente si existía
-                                    when (pendingActionAfterSave) {
-                                        "download" -> startDownload(inputApkUrl)
-                                        "browser" -> updateRepository.openInBrowser(context, inputApkUrl)
-                                        "share" -> updateRepository.shareDownloadLink(context, inputApkUrl, latestUpdate?.versionName ?: "nueva")
-                                        "copy" -> {
-                                            clipboardManager.setText(AnnotatedString(updateRepository.formatDirectDownloadUrl(inputApkUrl)))
-                                            Toast.makeText(context, "Enlace copiado al portapapeles", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    pendingActionAfterSave = null
-                                }.onFailure { e ->
-                                    Toast.makeText(context, "Error al guardar enlace: ${e.message}", Toast.LENGTH_LONG).show()
-                                }
-                            }
+                            showUpdateConfirmDialog = false
+                            startDownload(selectedApkUrl)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6)),
-                        enabled = !isSavingUrl
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22C55E))
                     ) {
-                        if (isSavingUrl) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(18.dp))
-                        } else {
-                            Text("Guardar y Continuar")
-                        }
+                        Text("Actualizar Ahora")
                     }
                 },
                 dismissButton = {
-                    TextButton(
-                        onClick = { showConfigUrlDialog = false },
-                        enabled = !isSavingUrl
-                    ) {
-                        Text("Cancelar", color = Color(0xFFA1A1AA))
+                    TextButton(onClick = { showUpdateConfirmDialog = false }) {
+                        Text("Cancelar", color = Color.Gray)
                     }
                 },
-                containerColor = Color(0xFF1F2937),
+                containerColor = Color(0xFF18181B),
                 titleContentColor = Color.White,
                 textContentColor = Color.White
             )
+        }
+    }
+}
+
+@Composable
+fun UpdateItemRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, color = Color.Gray, fontSize = 14.sp)
+        Text(text = value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
+}
+
+@Composable
+fun DownloadProgressView(progress: Float, text: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        LinearProgressIndicator(
+            progress = { progress },
+            color = Color(0xFF22C55E),
+            trackColor = Color(0xFF27272A),
+            modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("${(progress * 100).toInt()}% descargando...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text(text, color = Color.Gray, fontSize = 12.sp)
         }
     }
 }
