@@ -1,0 +1,1 @@
+sed -i 's/MainNavigationScreen()/com.example.ui.components.ModerationWrapper(onForceProfileUpdate = { \/* Handle if needed *\/ }) { MainNavigationScreen() }/g' app/src/main/java/com/example/MainActivity.kt

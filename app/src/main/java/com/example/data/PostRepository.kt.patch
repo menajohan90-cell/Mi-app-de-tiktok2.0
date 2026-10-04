@@ -1,0 +1,83 @@
+--- app/src/main/java/com/example/data/PostRepository.kt
++++ app/src/main/java/com/example/data/PostRepository.kt
+@@ -3,6 +3,8 @@
+ import com.google.firebase.auth.FirebaseAuth
+ import com.google.firebase.firestore.FieldValue
+ import com.google.firebase.firestore.FirebaseFirestore
++import com.google.firebase.storage.FirebaseStorage
++import android.net.Uri
+ import com.google.firebase.firestore.Query
+ import kotlinx.coroutines.tasks.await
+ import java.util.UUID
+@@ -10,6 +12,7 @@
+ class PostRepository {
+     private val db = FirebaseFirestore.getInstance()
+     private val auth = FirebaseAuth.getInstance()
++    private val storage = FirebaseStorage.getInstance()
+ 
+     suspend fun getVideos(feedType: String): Result<List<VideoModel>> {
+         return try {
+@@ -194,6 +197,7 @@
+ 
+     suspend fun publishVideo(
+         videoId: String,
+-        videoUrl: String,
++        localUriString: String,
+         description: String,
+         hashtags: List<String>,
+         username: String,
+-        displayName: String
++        displayName: String,
++        visibility: String
+     ): Result<VideoModel> {
+         return try {
+             val currentUid = auth.currentUser?.uid ?: return Result.failure(Exception("Not authenticated"))
+             val video = VideoModel(
+                 videoId = videoId,
+                 uid = currentUid,
+                 username = username,
+                 displayName = displayName,
+-                videoUrl = videoUrl,
++                videoUrl = localUriString,
+                 description = description,
+                 hashtags = hashtags,
+                 createdAt = System.currentTimeMillis(),
+                 views = 0,
+                 likesCount = 0,
+                 commentsCount = 0,
+                 sharesCount = 0,
+-                isLiked = false
++                isLiked = false,
++                status = "UPLOADING",
++                visibility = visibility
+             )
+             db.collection("videos").document(videoId).set(video).await()
++            
++            // Background upload process
++            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
++                try {
++                    val uri = Uri.parse(localUriString)
++                    val ref = storage.reference.child("videos/${currentUid}/${videoId}.mp4")
++                    ref.putFile(uri).await()
++                    val downloadUrl = ref.downloadUrl.await().toString()
++                    
++                    db.collection("videos").document(videoId).update(
++                        "videoUrl", downloadUrl,
++                        "status", "SECURITY_REVIEW"
++                    ).await()
++                    
++                    kotlinx.coroutines.delay(3000) // Simulate review
++                    
++                    db.collection("videos").document(videoId).update(
++                        "status", "READY"
++                    ).await()
++                } catch (e: Exception) {
++                    db.collection("videos").document(videoId).update(
++                        "status", "FAILED"
++                    ).await()
++                }
++            }
++            
+             Result.success(video)
+         } catch (e: Exception) {
+             Result.failure(e)

@@ -1,0 +1,4 @@
+sed -i 's/val systemDoc = chatsRef.document("system_msg").get().await()/val systemDoc = chatsRef.document("system").get().await()/g' app/src/main/java/com/example/ui/screens/ChatsScreen.kt
+sed -i 's/chatsRef.document("system_msg").set(welcomeChat).await()/chatsRef.document("system").set(welcomeChat).await()/g' app/src/main/java/com/example/ui/screens/ChatsScreen.kt
+sed -i 's/chatsRef.document("system_msg").collection("messages").add(initialMessage).await()/chatsRef.document("system").collection("messages").add(initialMessage).await()/g' app/src/main/java/com/example/ui/screens/ChatsScreen.kt
+sed -i 's/Text("S", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)/Icon(Icons.Default.Star, contentDescription = "Sistema", tint = Color.White)/g' app/src/main/java/com/example/ui/screens/ChatsScreen.kt

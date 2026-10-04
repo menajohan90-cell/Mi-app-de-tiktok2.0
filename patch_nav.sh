@@ -1,0 +1,1 @@
+sed -i 's|Scaffold(|com.example.ui.components.ModerationWrapper(onForceProfileUpdate = { navController.navigate("perfil") { launchSingleTop = true } }) { Scaffold(|g' app/src/main/java/com/example/ui/navigation/MainNavigationScreen.kt

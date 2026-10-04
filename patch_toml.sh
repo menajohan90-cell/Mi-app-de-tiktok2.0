@@ -1,0 +1,1 @@
+sed -i 's/firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }/firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }\nfirebase-storage = { group = "com.google.firebase", name = "firebase-storage" }/g' gradle/libs.versions.toml

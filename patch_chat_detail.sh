@@ -1,0 +1,1 @@
+sed -i 's/Text("S", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)/Icon(Icons.Default.Star, contentDescription = "Sistema", tint = Color.White, modifier = Modifier.size(20.dp))/g' app/src/main/java/com/example/ui/screens/ChatDetailScreen.kt

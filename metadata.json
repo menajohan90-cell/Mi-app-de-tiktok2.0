@@ -1,0 +1,6 @@
+{
+  "name": "Momentos",
+  "description": "A TikTok clone application featuring a video feed, Google Authentication, and Firebase integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

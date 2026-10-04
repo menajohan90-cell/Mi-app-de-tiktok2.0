@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    match /videos/{videoId} {
+      // Permitir lectura a usuarios autenticados para videos públicos o propios
+      allow read: if isAuthenticated() && (
+        resource.data.visibility == 'PUBLIC' || 
+        resource.data.visibility == 'public' || 
+        resource.data.uid == request.auth.uid
+      );
+      
+      allow create: if isAuthenticated() 
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.videoUrl is string;
+                    
+      allow update: if isAuthenticated() && (
+        resource.data.uid == request.auth.uid ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'commentsCount', 'views', 'sharesCount'])
+      );
+      
+      allow delete: if isOwner(resource.data.uid);
+      
+      // -- LIKES --
+      match /likes/{userId} {
+        allow read: if isAuthenticated();
+        
+        allow create: if isOwner(userId)
+                      && request.resource.data.keys().hasOnly(['createdAt'])
+                      && request.resource.data.createdAt is number;
+                      
+        allow delete: if isOwner(userId);
+        allow update: if false; 
+      }
+
+      // -- COMMENTS --
+      match /comments/{commentId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated()
+                      && request.resource.data.uid == request.auth.uid
+                      && request.resource.data.videoId == videoId
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 500
+                      && request.resource.data.createdAt is number
+                      && request.resource.data.username is string;
+                      
+        allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
+        allow update: if false; 
+      }
+    }
+
+    // -- REPORTES --
+    match /reports/{reportId} {
+      allow create: if isAuthenticated()
+                    && request.resource.data.reporterUid == request.auth.uid
+                    && request.resource.data.reason is string;
+      allow read, update: if isAuthenticated() && resource.data.reporterUid == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.reporterUid == request.auth.uid;
+    }
+
+    // -- VISTAS DE VIDEOS --
+    match /video_views/{viewId} {
+      allow read, create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // -- NOTIFICACIONES DEL SISTEMA Y CONEXIONES --
+    match /system_notifications/{notifId} {
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
+    }
+
+    // -- CONEXIONES --
+    match /connections/{connectionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() 
+                    && (request.resource.data.requesterUid == request.auth.uid || request.resource.data.targetUid == request.auth.uid);
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // -- USUARIOS --
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+
+    // -- CHATS Y MENSAJES --
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated();
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // -- ACTUALIZACIONES DE APP --
+    match /app_updates/{docId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // -- HISTORIAS --
+    match /stories/{storyId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // -- LIKES DE COMENTARIOS --
+    match /comment_likes/{likeId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}

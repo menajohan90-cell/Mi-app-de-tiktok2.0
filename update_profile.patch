@@ -1,0 +1,85 @@
+--- app/src/main/java/com/example/ui/screens/ProfileScreen.kt
++++ app/src/main/java/com/example/ui/screens/ProfileScreen.kt
+@@ -19,6 +19,7 @@
+ import androidx.compose.ui.unit.sp
+ import coil.compose.AsyncImage
+ import com.example.firebase.FirestoreManager
++import com.example.utils.UsernameValidator
+ import com.google.firebase.auth.FirebaseAuth
+ import com.google.firebase.auth.FirebaseUser
+ import kotlinx.coroutines.launch
+@@ -282,10 +283,11 @@
+         OutlinedTextField(
+             value = username,
+             onValueChange = { username = it },
+-            label = { Text("Nombre de usuario", color = Color.Gray) },
++            label = { Text("Nombre de usuario (único)", color = Color.Gray) },
++            leadingIcon = { Text("@", color = Color.Gray, modifier = Modifier.padding(start = 16.dp)) },
+             singleLine = true,
+             colors = OutlinedTextFieldDefaults.colors(
+                 focusedTextColor = Color.White,
+                 unfocusedTextColor = Color.White,
+                 focusedBorderColor = Color.White,
+                 unfocusedBorderColor = Color.DarkGray
+@@ -311,18 +313,29 @@
+         Button(
+             onClick = {
+                 if (username.isNotBlank() && !isSaving) {
+                     isSaving = true
+-                    val badWords = listOf("puto", "puta", "mierda", "pendejo", "pendeja", "cabron", "cabrona", "verga", "chingar", "joder", "idiota", "estupido", "estupida")
+-                    val isVulgar = badWords.any { username.lowercase().contains(it) || displayName.lowercase().contains(it) }
+-                    
+-                    if (isVulgar) {
+-                        isSaving = false
+-                        errorMessage = "Por favor, usa un lenguaje respetuoso."
++                    errorMessage = ""
++
++                    val formatCheck = UsernameValidator.validateUsernameFormat(username)
++                    if (formatCheck != UsernameValidator.ValidationResult.SUCCESS) {
++                        errorMessage = formatCheck.message!!
++                        isSaving = false
+                         return@Button
+                     }
+-                    errorMessage = ""
+-                    
++
++                    val userCheck = UsernameValidator.validateContent(username)
++                    if (userCheck != UsernameValidator.ValidationResult.SUCCESS) {
++                        errorMessage = userCheck.message!!
++                        isSaving = false
++                        return@Button
++                    }
++
++                    val nameCheck = UsernameValidator.validateContent(displayName)
++                    if (nameCheck != UsernameValidator.ValidationResult.SUCCESS) {
++                        errorMessage = "Tu nombre: " + nameCheck.message!!
++                        isSaving = false
++                        return@Button
++                    }
++
++                    val usernameLower = username.lowercase()
++
+                     scope.launch {
+                         try {
++                            val existingUsers = db.collection("users")
++                                .whereEqualTo("usernameLower", usernameLower)
++                                .get()
++                                .await()
++                                
++                            val isTaken = existingUsers.documents.any { it.id != user!!.uid }
++                            if (isTaken) {
++                                errorMessage = UsernameValidator.ValidationResult.TAKEN.message!!
++                                isSaving = false
++                                return@launch
++                            }
++
+                             val updates = mapOf(
+                                 "username" to username,
++                                "usernameLower" to usernameLower,
+                                 "displayName" to displayName,
+-                                "isProfileComplete" to true
++                                "isProfileComplete" to true,
++                                "createdAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                             )
+                             db.collection("users").document(user!!.uid).update(updates).await()
+                             onComplete()
