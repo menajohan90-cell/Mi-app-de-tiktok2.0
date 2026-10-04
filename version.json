@@ -1,0 +1,8 @@
+{
+  "versionName": "1.2.5",
+  "versionCode": 15,
+  "apkUrl": "https://github.com/TU_USUARIO/TU_REPO/releases/download/v1.2.5/app-release.apk",
+  "patchUrl": "https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/patch.zip",
+  "releaseNotes": "Correcciones críticas y nuevo sistema de parches.",
+  "mandatory": false
+}
